@@ -24,8 +24,6 @@ import {
   VerificationStatus,
 } from '../services/VerificationService';
 
-// ⚠️ TEST HELPER - REMOVE BEFORE PRODUCTION
-import VerificationTestHelper from '../components/VerificationTestHelper';
 
 // ============================================================================
 // CONSTANTS
@@ -275,10 +273,7 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.content}>
-          {/* ============================================================== */}
-          {/* ⚠️ TEST HELPER - REMOVE BEFORE PRODUCTION ⚠️ */}
-          {/* ============================================================== */}
-          <VerificationTestHelper />
+          
 
           {/* User Info Header */}
           <View style={styles.header}>

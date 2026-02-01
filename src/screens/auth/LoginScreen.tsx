@@ -122,12 +122,7 @@ export default function LoginScreen({ navigation }: Props) {
               </Text>
             </TouchableOpacity>
 
-            {/* Quick test credentials hint */}
-            <View style={styles.testCredentials}>
-              <Text style={styles.testText}>Test credentials:</Text>
-              <Text style={styles.testText}>Email: test@test.com</Text>
-              <Text style={styles.testText}>Password: password</Text>
-            </View>
+           
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -215,18 +210,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: Colors.secondary,
   },
-  testCredentials: {
-    marginTop: 30,
-    padding: 16,
-    backgroundColor: Colors.white,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  testText: {
-    fontSize: 14,
-    color: Colors.text,
-    opacity: 0.7,
-    textAlign: 'center',
-  },
+  
 });
