@@ -1,0 +1,127 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ========== Helper Functions ==========
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is an admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Check if user owns the resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is involved in the rental (as renter or owner)
+    function isRentalParty(rental) {
+      return isAuthenticated() && 
+             (rental.renterId == request.auth.uid || rental.ownerId == request.auth.uid);
+    }
+    
+    // Check if user is involved in the dispute (as reporter or accused)
+    function isDisputeParty(dispute) {
+      return isAuthenticated() && 
+             (dispute.reporterId == request.auth.uid || dispute.accusedId == request.auth.uid);
+    }
+    
+    // ========== Collection Rules ==========
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Items collection
+    match /items/{itemId} {
+      allow read: if true; // Anyone can browse items
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                       (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+                       (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+    
+    // Rentals collection
+    match /rentals/{rentalId} {
+      allow read: if isAuthenticated() && 
+                     (isRentalParty(resource.data) || isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                       (isRentalParty(resource.data) || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // Messages collection
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                       (resource.data.senderId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+                       (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+    
+    // Conversations collection
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() && 
+                     (request.auth.uid in resource.data.participantIds || isAdmin());
+      allow create: if isAuthenticated() && 
+                       (request.auth.uid in request.resource.data.participantIds);
+      allow update: if isAuthenticated() && 
+                       (request.auth.uid in resource.data.participantIds || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // Disputes collection
+    match /disputes/{disputeId} {
+      allow read: if isAuthenticated() && 
+                     (isDisputeParty(resource.data) || isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                       (isDisputeParty(resource.data) || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // Payments collection - PERMISSIVE FOR TESTING
+    match /payments/{paymentId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // Payment Methods collection
+    match /paymentMethods/{methodId} {
+      allow read: if isAuthenticated() && 
+                     (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                       (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+                       (resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // Payouts collection - UPDATED
+    match /payouts/{payoutId} {
+      allow read: if isAuthenticated() && 
+                     (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if true; // Cloud Functions need to create payouts
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Admin can read everything (catch-all for admin access)
+    match /{document=**} {
+      allow read: if isAdmin();
+    }
+  }
+}

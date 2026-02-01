@@ -1,0 +1,13 @@
+const { getDefaultConfig } = require('expo/metro-config');
+const path = require('path');
+
+const config = getDefaultConfig(__dirname);
+
+// Exclude functions folder and lib (compiled functions output)
+// Using path.sep for Windows compatibility
+config.resolver.blockList = [
+  new RegExp(`${path.sep}functions${path.sep}.*`),
+  new RegExp(`${path.sep}lib${path.sep}.*`),
+];
+
+module.exports = config;

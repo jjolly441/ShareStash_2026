@@ -1,0 +1,601 @@
+// src/screens/BookItemScreen.tsx - FIXED
+import React, { useState, useContext } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  Alert,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { RentalService } from '../services/RentalService'; // FIXED: Named import
+import MessageService from '../services/MessageService';
+import { AuthContext } from '../contexts/AuthContext';
+
+const Colors = {
+  primary: '#F5C542',
+  secondary: '#2E86AB',
+  success: '#46A758',
+  warning: '#F76707',
+  background: '#F8F9FA',
+  text: '#212529',
+  white: '#FFFFFF',
+  border: '#E9ECEF',
+};
+
+export default function BookItemScreen({ navigation, route }: any) {
+  const { itemId, itemTitle, itemImage, pricePerDay, ownerId, ownerName } = route.params;
+  const { user } = useContext(AuthContext);
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+
+  const dayAfterTomorrow = new Date();
+  dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 3);
+  dayAfterTomorrow.setHours(0, 0, 0, 0);
+
+  const [startDate, setStartDate] = useState(tomorrow);
+  const [endDate, setEndDate] = useState(dayAfterTomorrow);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const calculateRentalDetails = () => {
+    // Calculate days
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+    const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+    
+    // Calculate prices
+    const totalPrice = pricePerDay * totalDays;
+    const serviceFee = totalPrice * 0.1; // 10% service fee
+    const finalTotal = totalPrice + serviceFee;
+
+    return { totalDays, totalPrice, serviceFee, finalTotal };
+  };
+
+  const { totalDays, totalPrice, serviceFee, finalTotal } = calculateRentalDetails();
+
+  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowStartPicker(false);
+    }
+    
+    if (selectedDate) {
+      if (selectedDate >= endDate) {
+        Alert.alert('Invalid Date', 'Start date must be before end date');
+        setShowStartPicker(false);
+        return;
+      }
+      setStartDate(selectedDate);
+      if (Platform.OS === 'ios') {
+        setShowStartPicker(false);
+      }
+    } else if (event.type === 'dismissed') {
+      setShowStartPicker(false);
+    }
+  };
+
+  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowEndPicker(false);
+    }
+    
+    if (selectedDate) {
+      if (selectedDate <= startDate) {
+        Alert.alert('Invalid Date', 'End date must be after start date');
+        setShowEndPicker(false);
+        return;
+      }
+      setEndDate(selectedDate);
+      if (Platform.OS === 'ios') {
+        setShowEndPicker(false);
+      }
+    } else if (event.type === 'dismissed') {
+      setShowEndPicker(false);
+    }
+  };
+
+  const handleSubmitRequest = async () => {
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to book an item');
+      return;
+    }
+
+    if (totalDays < 1) {
+      Alert.alert('Invalid Rental Period', 'Rental must be at least 1 day');
+      return;
+    }
+
+    if (!message.trim()) {
+      Alert.alert('Message Required', 'Please add a message to the owner');
+      return;
+    }
+
+    Alert.alert(
+      'Confirm Rental Request',
+      `You are requesting to rent "${itemTitle}" from ${ownerName}.\n\nDates: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\nTotal: $${finalTotal.toFixed(2)}\n\nNote: Payment will be processed after the owner approves your request.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm', onPress: submitRentalRequest },
+      ]
+    );
+  };
+
+  const submitRentalRequest = async () => {
+    setLoading(true);
+
+    try {
+      // Create rental with updated interface
+      const rentalId = await RentalService.createRental({
+        itemId,
+        itemName: itemTitle, // Changed from itemTitle
+        itemImage,
+        ownerId,
+        ownerName,
+        renterId: user!.id,
+        renterName: `${user!.firstName} ${user!.lastName}`,
+        startDate: startDate,
+        endDate: endDate,
+        totalPrice: finalTotal,
+        status: 'pending',
+        message: message, // Changed from requestMessage
+      });
+
+      // Create conversation with owner
+      await MessageService.createConversation(
+        [user!.id, ownerId],
+        [`${user!.firstName} ${user!.lastName}`, ownerName],
+        itemId,
+        itemTitle,
+        message,
+        user!.id,
+        `${user!.firstName} ${user!.lastName}`
+      );
+
+      Alert.alert(
+        'Request Sent!',
+        'Your rental request has been sent to the owner. You will be notified when they respond.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.navigate('MainTabs', { screen: 'Rentals' });
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('Error submitting rental request:', error);
+      Alert.alert('Error', error.message || 'Failed to send rental request. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Book Item</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Item Info Card */}
+        <View style={styles.itemCard}>
+          <Image source={{ uri: itemImage }} style={styles.itemImage} />
+          <View style={styles.itemInfo}>
+            <Text style={styles.itemTitle}>{itemTitle}</Text>
+            <Text style={styles.itemOwner}>Listed by {ownerName}</Text>
+            <Text style={styles.itemPrice}>${pricePerDay}/day</Text>
+          </View>
+        </View>
+
+        {/* Date Selection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Rental Period</Text>
+
+          {/* Start Date */}
+          <View style={styles.dateContainer}>
+            <Text style={styles.dateLabel}>Start Date</Text>
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => setShowStartPicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color={Colors.secondary} />
+              <Text style={styles.dateText}>{startDate.toLocaleDateString()}</Text>
+              <Ionicons name="chevron-down" size={20} color={Colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          {showStartPicker && (
+            <DateTimePicker
+              value={startDate}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={handleStartDateChange}
+              minimumDate={tomorrow}
+            />
+          )}
+
+          {/* End Date */}
+          <View style={styles.dateContainer}>
+            <Text style={styles.dateLabel}>End Date</Text>
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => setShowEndPicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color={Colors.secondary} />
+              <Text style={styles.dateText}>{endDate.toLocaleDateString()}</Text>
+              <Ionicons name="chevron-down" size={20} color={Colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          {showEndPicker && (
+            <DateTimePicker
+              value={endDate}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={handleEndDateChange}
+              minimumDate={new Date(startDate.getTime() + 86400000)}
+            />
+          )}
+
+          {/* Rental Duration */}
+          <View style={styles.durationBadge}>
+            <Ionicons name="time-outline" size={20} color={Colors.primary} />
+            <Text style={styles.durationText}>
+              {totalDays} {totalDays === 1 ? 'day' : 'days'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Message to Owner */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Message to Owner</Text>
+          <TextInput
+            style={styles.messageInput}
+            value={message}
+            onChangeText={setMessage}
+            placeholder="Tell the owner why you want to rent this item and any questions you have..."
+            multiline
+            numberOfLines={4}
+            maxLength={500}
+          />
+          <Text style={styles.charCount}>{message.length}/500</Text>
+        </View>
+
+        {/* Price Breakdown */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Price Details</Text>
+
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>
+              ${pricePerDay} x {totalDays} {totalDays === 1 ? 'day' : 'days'}
+            </Text>
+            <Text style={styles.priceValue}>${totalPrice.toFixed(2)}</Text>
+          </View>
+
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Service Fee (10%)</Text>
+            <Text style={styles.priceValue}>${serviceFee.toFixed(2)}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.priceRow}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>${finalTotal.toFixed(2)}</Text>
+          </View>
+
+          <View style={styles.infoBox}>
+            <Ionicons name="information-circle-outline" size={20} color={Colors.secondary} />
+            <Text style={styles.infoText}>
+              Payment will be processed after the owner approves your request
+            </Text>
+          </View>
+        </View>
+
+        {/* Important Information */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Important Information</Text>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="shield-checkmark-outline" size={20} color={Colors.success} />
+            <Text style={styles.infoItemText}>
+              Your payment is protected until you confirm receipt
+            </Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="calendar-outline" size={20} color={Colors.success} />
+            <Text style={styles.infoItemText}>
+              Free cancellation up to 24 hours before rental start
+            </Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="chatbubble-outline" size={20} color={Colors.success} />
+            <Text style={styles.infoItemText}>
+              Communicate with the owner through our messaging system
+            </Text>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="alert-circle-outline" size={20} color={Colors.success} />
+            <Text style={styles.infoItemText}>
+              Report any issues or damage immediately
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* Bottom Action Bar */}
+      <View style={styles.bottomBar}>
+        <View style={styles.bottomPriceInfo}>
+          <Text style={styles.bottomTotal}>${finalTotal.toFixed(2)}</Text>
+          <Text style={styles.bottomSubtext}>for {totalDays} days</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+          onPress={handleSubmitRequest}
+          disabled={loading}
+        >
+          <Text style={styles.submitButtonText}>
+            {loading ? 'Sending...' : 'Request to Book'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: Colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  headerSpacer: {
+    width: 32,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  itemCard: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    margin: 20,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  itemImage: {
+    width: 100,
+    height: 100,
+  },
+  itemInfo: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'center',
+  },
+  itemTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  itemOwner: {
+    fontSize: 12,
+    color: Colors.text,
+    opacity: 0.6,
+    marginBottom: 8,
+  },
+  itemPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  section: {
+    backgroundColor: Colors.white,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.text,
+    marginBottom: 16,
+  },
+  dateContainer: {
+    marginBottom: 16,
+  },
+  dateLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  dateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  dateText: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+    marginLeft: 12,
+  },
+  durationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.primary + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  durationText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  messageInput: {
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: Colors.text,
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  charCount: {
+    fontSize: 12,
+    color: Colors.text,
+    opacity: 0.6,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  priceLabel: {
+    fontSize: 16,
+    color: Colors.text,
+  },
+  priceValue: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 12,
+  },
+  totalLabel: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  totalValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.primary,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.secondary + '10',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    gap: 8,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.secondary,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 12,
+  },
+  infoItemText: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  bottomPriceInfo: {
+    flex: 1,
+  },
+  bottomTotal: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  bottomSubtext: {
+    fontSize: 12,
+    color: Colors.text,
+    opacity: 0.6,
+  },
+  submitButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+});

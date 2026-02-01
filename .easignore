@@ -1,0 +1,23 @@
+notepad .easignore
+```
+
+Paste this content:
+```
+# Windows system folders
+AppData/
+Users/
+
+# Node modules
+node_modules/
+functions/node_modules/
+functions/lib/
+
+# Git
+.git/
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+.temp/
