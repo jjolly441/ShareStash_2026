@@ -1,16 +1,19 @@
 // src/services/ItemService.ts - Firebase version with Location Features
+// UPDATED: Added updateItem and deleteItem methods
 import { 
   collection, 
   doc, 
   getDocs, 
   getDoc, 
-  addDoc, 
+  addDoc,
+  updateDoc,
+  deleteDoc, 
   query, 
   where,
   orderBy,
   Timestamp 
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 
 export interface RentalItem {
@@ -24,6 +27,7 @@ export interface RentalItem {
   ownerName: string;
   isAvailable: boolean;
   createdAt: string;
+  updatedAt?: string;
   location?: {
     address: string;
     city: string;
@@ -133,13 +137,13 @@ class ItemService {
     }
   }
 
-  async searchItems(query: string): Promise<RentalItem[]> {
+  async searchItems(searchQuery: string): Promise<RentalItem[]> {
     try {
       // Note: Firestore doesn't have full-text search
       // This gets all items and filters client-side
       // For production, consider Algolia or ElasticSearch
       const allItems = await this.getAvailableItems();
-      const lowerQuery = query.toLowerCase();
+      const lowerQuery = searchQuery.toLowerCase();
       
       return allItems.filter(item =>
         item.title.toLowerCase().includes(lowerQuery) ||
@@ -180,6 +184,78 @@ class ItemService {
     } catch (error) {
       console.error('Error adding item:', error);
       return { success: false, error: 'Failed to add item' };
+    }
+  }
+
+  // NEW: Update an existing item
+  async updateItem(
+    itemId: string, 
+    updates: Partial<Omit<RentalItem, 'id' | 'createdAt' | 'ownerId' | 'ownerName'>>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // If there's a new image that's a local URI, upload it first
+      let imageUrl = updates.image;
+      if (updates.image && !updates.image.startsWith('http')) {
+        imageUrl = await this.uploadImage(updates.image, itemId);
+      }
+
+      const updateData: any = {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Only include image if it was updated
+      if (imageUrl) {
+        updateData.image = imageUrl;
+      }
+
+      const docRef = doc(db, 'items', itemId);
+      await updateDoc(docRef, updateData);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating item:', error);
+      return { success: false, error: 'Failed to update item' };
+    }
+  }
+
+  // NEW: Delete an item
+  async deleteItem(itemId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Try to delete associated images from storage
+      try {
+        const storageRef = ref(storage, 'items');
+        const listResult = await listAll(storageRef);
+        const itemImages = listResult.items.filter(item => item.name.startsWith(itemId));
+        await Promise.all(itemImages.map(imageRef => deleteObject(imageRef)));
+      } catch (storageError) {
+        console.warn('Could not delete images:', storageError);
+        // Continue with item deletion even if image deletion fails
+      }
+
+      // Delete the item document
+      const docRef = doc(db, 'items', itemId);
+      await deleteDoc(docRef);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      return { success: false, error: 'Failed to delete item' };
+    }
+  }
+
+  // NEW: Toggle item availability
+  async toggleItemAvailability(itemId: string, isAvailable: boolean): Promise<{ success: boolean; error?: string }> {
+    try {
+      const docRef = doc(db, 'items', itemId);
+      await updateDoc(docRef, { 
+        isAvailable,
+        updatedAt: new Date().toISOString()
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Error toggling availability:', error);
+      return { success: false, error: 'Failed to update availability' };
     }
   }
 

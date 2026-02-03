@@ -514,11 +514,42 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
 
       {isOwnItem && (
         <View style={styles.bottomBar}>
-          <Text style={styles.ownItemText}>This is your listing</Text>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => {
+              Alert.alert(
+                'Delete Item',
+                'Are you sure you want to delete this item? This action cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        const result = await ItemService.deleteItem(item.id);
+                        if (result.success) {
+                          Alert.alert('Success', 'Item deleted successfully', [
+                            { text: 'OK', onPress: () => navigation.goBack() }
+                          ]);
+                        } else {
+                          Alert.alert('Error', result.error || 'Failed to delete item');
+                        }
+                      } catch (error) {
+                        Alert.alert('Error', 'Failed to delete item');
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+          >
+            <Ionicons name="trash-outline" size={20} color={Colors.white} />
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.rentButton, styles.editButton]}
             onPress={() => {
-              Alert.alert('Coming Soon', 'Edit item functionality will be added');
+              navigation.navigate('AddItem', { editItemId: item.id });
             }}
           >
             <Text style={styles.rentButtonText}>Edit Item</Text>
@@ -1062,4 +1093,13 @@ const styles = StyleSheet.create({
   editButton: {
     backgroundColor: Colors.secondary,
   },
+  deleteButton: {
+    backgroundColor: '#DC3545',
+    padding: 14,
+    borderRadius: 8,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+},
 });
+

@@ -1,6 +1,8 @@
 // App.tsx
 // Updated with VerifyIdentityScreen (web-based) and deep link handling
 // ADDED: Verification reminder for abandoned verifications
+// ADDED: MyItemsScreen for managing user's items
+// FIXED: AddItemScreen type error in Tab Navigator
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Linking, Alert } from 'react-native';
@@ -35,6 +37,7 @@ import EarningsScreen from './src/screens/EarningsScreen';
 import StripeConnectScreen from './src/screens/StripeConnectScreen';
 import CreateReviewScreen from './src/screens/CreateReviewScreen';
 import NotificationsScreen from './src/screens/NotificationScreens';
+import MyItemsScreen from './src/screens/MyItemsScreen';
 
 // Verification hook for abandoned verification reminders
 import { useVerificationReminder } from './src/hooks/useVerification';
@@ -115,9 +118,10 @@ function MainTabs() {
       <Tab.Screen name="Rentals" component={RentalsScreen} />
       <Tab.Screen 
         name="AddItem" 
-        component={AddItemScreen}
         options={{ tabBarLabel: 'Add' }}
-      />
+      >
+        {(props: any) => <AddItemScreen {...props} />}
+      </Tab.Screen>
       <Tab.Screen name="Messages" component={MessagesScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
@@ -287,7 +291,10 @@ function AppContent() {
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen name="PaymentMethods" component={PaymentMethodScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
-            <Stack.Screen name="AddItem" component={AddItemScreen} />
+            <Stack.Screen name="AddItem">
+              {(props: any) => <AddItemScreen {...props} />}
+            </Stack.Screen>
+            <Stack.Screen name="MyItems" component={MyItemsScreen} />
             <Stack.Screen name="Earnings" component={EarningsScreen} />
             <Stack.Screen name="StripeConnect" component={StripeConnectScreen} />
             <Stack.Screen name="AdminDashboard" component={AdminDashboard} />
@@ -333,3 +340,4 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
 });
+

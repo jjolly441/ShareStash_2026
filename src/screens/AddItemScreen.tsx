@@ -135,9 +135,13 @@ const VerificationRequired: React.FC<VerificationRequiredProps> = ({ onVerify })
 // MAIN COMPONENT
 // ============================================================================
 
-export default function AddItemScreen() {
+export default function AddItemScreen({ route }: any) {
   const navigation = useNavigation<AddItemScreenNavigationProp>();
   const { user } = useContext(AuthContext);
+  
+  // Check if we're editing an existing item
+  const editItemId = route?.params?.editItemId;
+  const isEditing = !!editItemId;
 
   // NEW: Verification state
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus | null>(null);
@@ -158,8 +162,9 @@ export default function AddItemScreen() {
       coordinates: null,
     },
   });
-  const [loading, setLoading] = useState(false);
+ const [loading, setLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [loadingItem, setLoadingItem] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [locationMethod, setLocationMethod] = useState<'auto' | 'manual'>('manual');
 
@@ -187,9 +192,55 @@ export default function AddItemScreen() {
     }
   };
 
-  const handleVerifyIdentity = () => {
+ const handleVerifyIdentity = () => {
     navigation.navigate('VerifyIdentity');
   };
+
+  // ==========================================================================
+  // EDIT MODE: Load existing item data
+  // ==========================================================================
+  
+  useEffect(() => {
+    if (editItemId) {
+      loadExistingItem();
+    }
+  }, [editItemId]);
+
+  const loadExistingItem = async () => {
+    try {
+      setLoadingItem(true);
+      const existingItem = await ItemService.getItemById(editItemId);
+      if (existingItem) {
+        setItemData({
+          title: existingItem.title,
+          description: existingItem.description,
+          category: existingItem.category,
+          pricePerDay: existingItem.pricePerDay.toString(),
+          image: existingItem.image,
+          location: existingItem.location || {
+            address: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            coordinates: null,
+          },
+        });
+      } else {
+        Alert.alert('Error', 'Item not found');
+        navigation.goBack();
+      }
+    } catch (error) {
+      console.error('Error loading item:', error);
+      Alert.alert('Error', 'Failed to load item');
+      navigation.goBack();
+    } finally {
+      setLoadingItem(false);
+    }
+  };
+
+  // ==========================================================================
+  // ORIGINAL: All form handlers (unchanged)
+  // ==========================================================================
 
   // ==========================================================================
   // ORIGINAL: All form handlers (unchanged)
@@ -371,14 +422,14 @@ export default function AddItemScreen() {
     return true;
   };
 
-  const handleSubmit = async () => {
+ const handleSubmit = async () => {
     if (!user) {
       Alert.alert('Error', 'You must be logged in to add an item');
       return;
     }
 
-    // NEW: Double-check verification status before submitting
-    if (!verificationStatus?.identityVerified) {
+    // Double-check verification status before submitting (skip for editing)
+    if (!isEditing && !verificationStatus?.identityVerified) {
       Alert.alert(
         'Verification Required',
         'You must verify your identity before listing items.',
@@ -395,67 +446,92 @@ export default function AddItemScreen() {
     setLoading(true);
     
     try {
-      const result = await ItemService.addItem({
-        title: itemData.title,
-        description: itemData.description,
-        category: itemData.category,
-        pricePerDay: parseFloat(itemData.pricePerDay),
-        image: itemData.image!,
-        ownerId: user.id,
-        ownerName: `${user.firstName} ${user.lastName}`,
-        isAvailable: true,
-        location: itemData.location,
-      });
+      if (isEditing) {
+        // UPDATE existing item
+        const result = await ItemService.updateItem(editItemId, {
+          title: itemData.title.trim(),
+          description: itemData.description.trim(),
+          category: itemData.category,
+          pricePerDay: parseFloat(itemData.pricePerDay),
+          image: itemData.image!,
+          isAvailable: true,
+          location: itemData.location,
+        });
 
-      if (result.success) {
-        Alert.alert(
-          'Success!',
-          'Your item has been listed successfully',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                // Reset form
-                setItemData({
-                  title: '',
-                  description: '',
-                  category: '',
-                  pricePerDay: '',
-                  image: null,
-                  location: {
-                    address: '',
-                    city: '',
-                    state: '',
-                    zipCode: '',
-                    coordinates: null,
-                  },
-                });
-              }
-            }
-          ]
-        );
+        if (result.success) {
+          Alert.alert(
+            'Success!',
+            'Your item has been updated successfully',
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+        } else {
+          Alert.alert('Error', result.error || 'Failed to update item');
+        }
       } else {
-        Alert.alert('Error', result.error || 'Failed to list item');
+        // CREATE new item
+        const result = await ItemService.addItem({
+          title: itemData.title.trim(),
+          description: itemData.description.trim(),
+          category: itemData.category,
+          pricePerDay: parseFloat(itemData.pricePerDay),
+          image: itemData.image!,
+          ownerId: user.id,
+          ownerName: `${user.firstName} ${user.lastName}`,
+          isAvailable: true,
+          location: itemData.location,
+        });
+
+        if (result.success) {
+          Alert.alert(
+            'Success!',
+            'Your item has been listed successfully',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  // Reset form
+                  setItemData({
+                    title: '',
+                    description: '',
+                    category: '',
+                    pricePerDay: '',
+                    image: null,
+                    location: {
+                      address: '',
+                      city: '',
+                      state: '',
+                      zipCode: '',
+                      coordinates: null,
+                    },
+                  });
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert('Error', result.error || 'Failed to list item');
+        }
       }
     } catch (error) {
-      console.error('Error adding item:', error);
-      Alert.alert('Error', 'Failed to list item. Please try again.');
+      console.error('Error saving item:', error);
+      Alert.alert('Error', 'Failed to save item. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   // ==========================================================================
   // RENDER
   // ==========================================================================
 
   // NEW: Show loading while checking verification
-  if (checkingVerification) {
+  // Show loading while checking verification or loading item for edit
+  if (checkingVerification || loadingItem) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={styles.title}>{isEditing ? 'Edit Item' : 'List Your Item'}</Text>
         </View>
       </SafeAreaView>
     );
@@ -484,7 +560,9 @@ export default function AddItemScreen() {
           {/* ORIGINAL: All content below is unchanged */}
           <Text style={styles.title}>List Your Item</Text>
           <Text style={styles.subtitle}>
-            Share your items with the community and earn money
+            {isEditing 
+              ? 'Update your item details below' 
+              : 'Share your items with the community and earn money'}
           </Text>
 
           {/* Photo Section */}
@@ -722,7 +800,9 @@ export default function AddItemScreen() {
             disabled={loading}
           >
             <Text style={styles.submitButtonText}>
-              {loading ? 'Listing Item...' : 'List Item'}
+              {loading 
+                ? (isEditing ? 'Updating...' : 'Listing...') 
+                : (isEditing ? 'Update Item' : 'List Item')}
             </Text>
           </TouchableOpacity>
         </View>

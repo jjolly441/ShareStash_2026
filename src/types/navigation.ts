@@ -18,6 +18,9 @@ export type RootStackParamList = {
   ItemDetails: { itemId: string };
   BookItem: { itemId: string };
   
+  // My Items
+  MyItems: undefined;
+  
   // Payment screens
   Checkout: { 
     rentalId: string; 

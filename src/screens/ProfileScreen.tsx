@@ -583,7 +583,10 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
+           <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('MyItems')}
+            >
               <Ionicons name="list-outline" size={24} color={Colors.text} />
               <Text style={styles.menuText}>My Items</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
