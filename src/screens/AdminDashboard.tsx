@@ -527,11 +527,13 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   );
 
   const renderUsers = () => {
-    const filteredUsers = users.filter(u =>
-      u.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredUsers = users.filter(u => {
+      const query = searchQuery.toLowerCase();
+      const firstName = (u.firstName || '').toLowerCase();
+      const lastName = (u.lastName || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      return firstName.includes(query) || lastName.includes(query) || email.includes(query);
+    });
 
     return (
       <View style={styles.content}>
@@ -596,11 +598,13 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   };
 
   const renderItems = () => {
-    const filteredItems = items.filter(i =>
-      i.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.ownerName.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredItems = items.filter(i => {
+      const query = searchQuery.toLowerCase();
+      const title = (i.title || '').toLowerCase();
+      const category = (i.category || '').toLowerCase();
+      const ownerName = (i.ownerName || '').toLowerCase();
+      return title.includes(query) || category.includes(query) || ownerName.includes(query);
+    });
 
     return (
       <View style={styles.content}>
@@ -676,11 +680,13 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   };
 
   const renderRentals = () => {
-    const filteredRentals = rentals.filter(r =>
-      r.itemTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.renterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.ownerName.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredRentals = rentals.filter(r => {
+      const query = searchQuery.toLowerCase();
+      const itemTitle = (r.itemTitle || '').toLowerCase();
+      const renterName = (r.renterName || '').toLowerCase();
+      const ownerName = (r.ownerName || '').toLowerCase();
+      return itemTitle.includes(query) || renterName.includes(query) || ownerName.includes(query);
+    });
 
     const getStatusColor = (status: string) => {
       const colors = {
@@ -763,12 +769,11 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
 
   const renderDisputes = () => {
     const filteredDisputes = disputes.filter(d => {
-      const itemName = (d as any).itemName || (d as any).itemTitle || '';
-      return (
-        itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        d.reporterName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        d.accusedName.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      const query = searchQuery.toLowerCase();
+      const itemName = ((d as any).itemName || (d as any).itemTitle || '').toLowerCase();
+      const reporterName = (d.reporterName || '').toLowerCase();
+      const accusedName = (d.accusedName || '').toLowerCase();
+      return itemName.includes(query) || reporterName.includes(query) || accusedName.includes(query);
     });
 
     return (

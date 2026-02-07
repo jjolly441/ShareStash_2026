@@ -1,9 +1,10 @@
 // src/services/AuthService.ts - Firebase version
-import { 
+import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
     signOut,
     onAuthStateChanged,
+    sendPasswordResetEmail,
   } from 'firebase/auth';
   import { doc, setDoc, getDoc } from 'firebase/firestore';
   import { auth, db } from '../config/firebase';
@@ -157,6 +158,26 @@ import {
     getCurrentUser(): User | null {
       return this.currentUser;
     }
+
+    async resetPassword(email: string): Promise<{ success: boolean; error?: string }> {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        return { success: true };
+      } catch (error: any) {
+        console.error('Password reset error:', error);
+        
+        let errorMessage = 'Failed to send reset email. Please try again.';
+        if (error.code === 'auth/user-not-found') {
+          errorMessage = 'No account found with this email address';
+        } else if (error.code === 'auth/invalid-email') {
+          errorMessage = 'Please enter a valid email address';
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage = 'Too many requests. Please try again later';
+        }
+        
+        return { success: false, error: errorMessage };
+      }
+    }
   
     // Validation helpers
     static validateEmail(email: string): boolean {
@@ -209,3 +230,4 @@ import {
   }
   
   export default AuthService.getInstance();
+  
