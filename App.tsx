@@ -13,6 +13,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { AuthProvider, AuthContext } from './src/contexts/AuthContext';
 import NotificationService from './src/services/NotificationService';
+import * as Notifications from 'expo-notifications';
+
+// Configure foreground notification behavior - show banner even when app is open
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 // Auth Screens
 import LoginScreen from './src/screens/auth/LoginScreen';
@@ -38,6 +48,8 @@ import StripeConnectScreen from './src/screens/StripeConnectScreen';
 import CreateReviewScreen from './src/screens/CreateReviewScreen';
 import NotificationsScreen from './src/screens/NotificationScreens';
 import MyItemsScreen from './src/screens/MyItemsScreen';
+import EditProfileScreen from './src/screens/EditProfileScreen';
+import PublicProfileScreen from './src/screens/PublicProfileScreen';
 
 // Verification hook for abandoned verification reminders
 import { useVerificationReminder } from './src/hooks/useVerification';
@@ -295,6 +307,8 @@ function AppContent() {
               {(props: any) => <AddItemScreen {...props} />}
             </Stack.Screen>
             <Stack.Screen name="MyItems" component={MyItemsScreen} />
+            <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+            <Stack.Screen name="PublicProfile" component={PublicProfileScreen} />
             <Stack.Screen name="Earnings" component={EarningsScreen} />
             <Stack.Screen name="StripeConnect" component={StripeConnectScreen} />
             <Stack.Screen name="AdminDashboard" component={AdminDashboard} />
@@ -340,4 +354,3 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
 });
-

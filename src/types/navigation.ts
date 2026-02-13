@@ -63,6 +63,15 @@ export type RootStackParamList = {
   
   // Notifications
   Notifications: undefined;
+
+  // Edit Profile (Issue #18)
+  EditProfile: undefined;
+
+  // Public Profile (Issue #16)
+  PublicProfile: {
+    userId: string;
+    userName?: string;
+  };
 };
 
 // Helper type for useNavigation hook

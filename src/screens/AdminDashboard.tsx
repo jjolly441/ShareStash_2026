@@ -31,6 +31,7 @@ import { AuthContext } from '../contexts/AuthContext';
 import DisputeService, { Dispute } from '../services/DisputeService';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { runAllMigrations } from '../scripts/migrateRentals'; // NEW IMPORT
+import NotificationService from '../services/NotificationService'; // Issue #13: Blast messages
 
 
 const Colors = {
@@ -245,6 +246,55 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
           }
         }
       ]
+    );
+  };
+
+  // Issue #13: Blast message to all users
+  const handleBlastMessage = () => {
+    Alert.prompt(
+      'Send Blast Message',
+      'Enter the notification title:',
+      async (title) => {
+        if (!title?.trim()) return;
+        Alert.prompt(
+          'Message Body',
+          'Enter the notification message:',
+          async (body) => {
+            if (!body?.trim()) return;
+            Alert.alert(
+              'Confirm Blast',
+              `Send this notification to all ${users.length} users?\n\nTitle: ${title}\nMessage: ${body}`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Send to All',
+                  onPress: async () => {
+                    setLoading(true);
+                    let sent = 0;
+                    try {
+                      for (const u of users) {
+                        await NotificationService.storeNotification(
+                          u.id,
+                          title.trim(),
+                          body.trim(),
+                          { type: 'dispute_admin_update', screen: 'Notifications' }
+                        );
+                        sent++;
+                      }
+                      Alert.alert('Success', `Notification sent to ${sent} users.`);
+                    } catch (error) {
+                      console.error('Blast message error:', error);
+                      Alert.alert('Error', `Sent to ${sent} users before failing.`);
+                    } finally {
+                      setLoading(false);
+                    }
+                  },
+                },
+              ]
+            );
+          }
+        );
+      }
     );
   };
 
@@ -522,6 +572,23 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
             Run this migration once to update all existing rentals and disputes to use the new field names.
           </Text>
         </View>
+
+        {/* Blast Message Tool - Issue #13 */}
+        <TouchableOpacity 
+          style={styles.migrationButton}
+          onPress={handleBlastMessage}
+        >
+          <View style={styles.migrationButtonContent}>
+            <Ionicons name="megaphone" size={24} color={Colors.admin} />
+            <View style={styles.migrationButtonText}>
+              <Text style={styles.migrationButtonTitle}>Send Blast Message</Text>
+              <Text style={styles.migrationButtonSubtitle}>
+                Notify all users via in-app notification
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={Colors.admin} />
+          </View>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );

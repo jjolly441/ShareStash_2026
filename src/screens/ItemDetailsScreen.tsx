@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
@@ -157,14 +158,13 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
     }
 
     try {
+      // Create or find existing conversation WITHOUT sending an auto-message
+      // This lets the user type their own first message in the Chat screen
       const result = await MessageService.createConversation(
         [user.id, item.ownerId],
         [`${user.firstName} ${user.lastName}`, item.ownerName],
         item.id,
-        item.title,
-        `Hi, I'm interested in renting your ${item.title}. Is it available?`,
-        user.id,
-        `${user.firstName} ${user.lastName}`
+        item.title
       );
 
       if (result.success && result.conversationId) {
@@ -207,6 +207,28 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
 
   const toggleFavorite = () => {
     setIsFavorite(!isFavorite);
+  };
+
+  // Issue #20: Share item using native OS share sheet
+  const handleShareItem = async () => {
+    if (!item) return;
+    try {
+      await Share.share({
+        title: item.title,
+        message: `Check out "${item.title}" on ShareStash! $${item.pricePerDay}/day. https://sharestash.app/item/${item.id}`,
+      });
+    } catch (error) {
+      console.error('Error sharing item:', error);
+    }
+  };
+
+  // Issue #16: Navigate to owner public profile
+  const handleViewOwnerProfile = () => {
+    if (!item) return;
+    navigation.navigate('PublicProfile', {
+      userId: item.ownerId,
+      userName: item.ownerName,
+    });
   };
 
   const formatDate = (dateString: string) => {
@@ -279,6 +301,11 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
             </TouchableOpacity>
           )}
 
+          {/* Share Button */}
+          <TouchableOpacity style={styles.shareButton} onPress={handleShareItem}>
+            <Ionicons name="share-outline" size={22} color={Colors.text} />
+          </TouchableOpacity>
+
           <View style={[styles.availabilityBadge, !item.isAvailable && styles.unavailableBadge]}>
             <Text style={styles.availabilityText}>
               {item.isAvailable ? 'Available' : 'Unavailable'}
@@ -330,7 +357,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
 
           {/* Owner Info - UPDATED with verification badge */}
           <View style={styles.ownerSection}>
-            <View style={styles.ownerInfo}>
+            <TouchableOpacity style={styles.ownerInfo} onPress={handleViewOwnerProfile}>
               <View style={styles.ownerAvatarContainer}>
                 <View style={styles.ownerAvatar}>
                   <Ionicons name="person" size={24} color={Colors.white} />
@@ -350,7 +377,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
                   <VerificationBadge isVerified={ownerVerified} size="small" />
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
             {!isOwnItem && (
               <TouchableOpacity style={styles.contactButton} onPress={handleContactOwner}>
                 <Ionicons name="chatbubble-outline" size={20} color={Colors.secondary} />
@@ -620,6 +647,22 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  shareButton: {
+    position: 'absolute',
+    top: 12,
+    right: 60,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   availabilityBadge: {
     position: 'absolute',
     bottom: 12,
@@ -724,6 +767,8 @@ const styles = StyleSheet.create({
   ownerInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
   },
   ownerAvatarContainer: {
     position: 'relative',
@@ -839,6 +884,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.secondary,
     borderRadius: 20,
     gap: 6,
+    flexShrink: 0,
   },
   contactButtonText: {
     fontSize: 14,
@@ -1102,4 +1148,3 @@ const styles = StyleSheet.create({
     alignItems: 'center',
 },
 });
-

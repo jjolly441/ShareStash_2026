@@ -1,6 +1,6 @@
 // src/screens/AddItemScreen.tsx - With Location Features
 // UPDATED: Added identity verification gate while preserving all original functionality
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import ItemService from '../services/ItemService';
 import { AuthContext } from '../contexts/AuthContext';
@@ -169,12 +169,15 @@ export default function AddItemScreen({ route }: any) {
   const [locationMethod, setLocationMethod] = useState<'auto' | 'manual'>('manual');
 
   // ==========================================================================
-  // NEW: VERIFICATION CHECK
+  // NEW: VERIFICATION CHECK - uses useFocusEffect to re-check when returning
+  // from the VerifyIdentity screen
   // ==========================================================================
 
-  useEffect(() => {
-    checkVerificationStatus();
-  }, [user]);
+  useFocusEffect(
+    useCallback(() => {
+      checkVerificationStatus();
+    }, [user])
+  );
 
   const checkVerificationStatus = async () => {
     if (!user) {

@@ -1,4 +1,5 @@
 // src/services/RentalService.ts - UPDATED WITH PAYOUT INTEGRATION & NOTIFICATIONS
+// FIX Issues #9/#10: Added confirmation number generation
 import { 
   collection, 
   doc, 
@@ -13,6 +14,37 @@ import {
 import { db } from '../config/firebase';
 import { PayoutService } from './PayoutService';
 import NotificationService from './NotificationService';
+
+// ============================================================================
+// CONFIRMATION NUMBER GENERATOR - Issue #9
+// ============================================================================
+
+/**
+ * Generate a unique confirmation number in format: SS-YYYYMMDD-XXXX
+ * SS = Share Stash prefix
+ * YYYYMMDD = date
+ * XXXX = random alphanumeric (uppercase, no ambiguous chars)
+ */
+function generateConfirmationNumber(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const dateStr = `${year}${month}${day}`;
+  
+  // Use unambiguous characters (no 0/O, 1/I/L)
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let randomPart = '';
+  for (let i = 0; i < 4; i++) {
+    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  return `SS-${dateStr}-${randomPart}`;
+}
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 export interface Rental {
   id?: string;
@@ -35,6 +67,8 @@ export interface Rental {
   payoutId?: string;
   payoutStatus?: 'pending' | 'processing' | 'completed' | 'failed';
   payoutProcessedAt?: Timestamp;
+  // Issue #9/#10: Confirmation number
+  confirmationNumber?: string;
 }
 
 class RentalServiceClass {
@@ -42,14 +76,36 @@ class RentalServiceClass {
 
   /**
    * Create a rental request
+   * FIX Issue #9: Generate unique confirmation number
    */
   async createRental(rentalData: Omit<Rental, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     try {
+      // Generate a unique confirmation number
+      let confirmationNumber = generateConfirmationNumber();
+      
+      // Ensure uniqueness by checking Firestore (very unlikely collision but safe)
+      let isUnique = false;
+      let attempts = 0;
+      while (!isUnique && attempts < 5) {
+        const q = query(
+          this.rentalsCollection,
+          where('confirmationNumber', '==', confirmationNumber)
+        );
+        const existing = await getDocs(q);
+        if (existing.empty) {
+          isUnique = true;
+        } else {
+          confirmationNumber = generateConfirmationNumber();
+          attempts++;
+        }
+      }
+
       const docRef = await addDoc(this.rentalsCollection, {
         ...rentalData,
         status: 'pending',
         paymentStatus: 'unpaid',
         payoutStatus: 'pending',
+        confirmationNumber, // Issue #9: Store confirmation number
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });

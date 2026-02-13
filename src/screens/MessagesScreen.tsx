@@ -1,4 +1,6 @@
 // src/screens/MessagesScreen.tsx - FIXED
+// FIX Issue #5: Use real-time subscription instead of one-time fetch
+// so sender sees conversations they initiated and messages update in real-time
 import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
@@ -31,25 +33,33 @@ export default function MessagesScreen() {
   const navigation = useNavigation();
 
   useEffect(() => {
-    loadConversations();
-  }, []);
-
-  const loadConversations = async () => {
     if (!user) return;
-    
-    try {
-      const convs = await MessageService.getUserConversations(user.id);
-      setConversations(convs);
-    } catch (error) {
-      console.error('Error loading conversations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+
+    // FIX Issue #5: Use real-time subscription instead of one-time fetch
+    // This ensures the sender sees conversations they initiated immediately,
+    // and any new messages update the conversation list in real-time
+    const unsubscribe = MessageService.subscribeToUserConversations(
+      user.id,
+      (convs) => {
+        setConversations(convs);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadConversations();
+    // Force a one-time re-fetch to supplement the real-time listener
+    if (user) {
+      try {
+        const convs = await MessageService.getUserConversations(user.id);
+        setConversations(convs);
+      } catch (error) {
+        console.error('Error refreshing conversations:', error);
+      }
+    }
     setRefreshing(false);
   };
 

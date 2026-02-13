@@ -190,7 +190,53 @@ class NotificationService {
   }
 
   /**
-   * Send notification to specific user (would use Firebase Cloud Functions in production)
+   * Send push notification via Expo Push API
+   * Expo's push API is open - no API key required
+   */
+  private async sendExpoPushNotification(
+    pushToken: string,
+    title: string,
+    body: string,
+    data: NotificationData
+  ): Promise<boolean> {
+    try {
+      const message = {
+        to: pushToken,
+        sound: 'default',
+        title,
+        body,
+        data,
+        priority: 'high' as const,
+      };
+
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      });
+
+      const result = await response.json();
+
+      if (result.data?.status === 'error') {
+        console.error('Expo push error:', result.data.message);
+        return false;
+      }
+
+      console.log('✅ Push notification sent successfully');
+      return true;
+    } catch (error) {
+      console.error('Error sending push notification:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Send notification to specific user
+   * Stores in Firestore AND sends a real push notification
    */
   async sendNotificationToUser(
     userId: string,
@@ -199,12 +245,16 @@ class NotificationService {
     data: NotificationData
   ): Promise<void> {
     try {
-      // Store notification for notification center
+      // Store notification for in-app notification center
       await this.storeNotification(userId, title, body, data);
 
-      // In production, you would call a Cloud Function here to send push notification
-      // For now, we'll just store it
-      console.log(`Notification stored for user ${userId}: ${title}`);
+      // Send actual push notification if user has a push token
+      const pushToken = await this.getUserPushToken(userId);
+      if (pushToken) {
+        await this.sendExpoPushNotification(pushToken, title, body, data);
+      } else {
+        console.log(`No push token for user ${userId} - notification stored only`);
+      }
     } catch (error) {
       console.error('Error sending notification to user:', error);
     }

@@ -753,6 +753,110 @@ export const createRefund = onRequest(
 );
 
 // ============================================
+// ISSUE #7 & #8 FIX: Add missing processTransfer Cloud Function
+// ============================================
+// ADD this function to functions/src/index.ts BEFORE the Identity Verification section
+// (i.e., after the createRefund function, around line 753)
+//
+// ROOT CAUSE: PayoutService.ts calls a Cloud Function named 'processTransfer'
+// but no such function exists in functions/src/index.ts. When the app calls the
+// non-existent endpoint, Firebase returns an HTML 404 page instead of JSON,
+// causing the "JSON parse error" (Issue #7). Since payouts fail, earnings
+// never update (Issue #8).
+// ============================================
+
+/**
+ * Process a transfer/payout to a seller's Connect account
+ * Called by PayoutService.processRentalPayout()
+ */
+export const processTransfer = onRequest(
+  { ...httpsOptions, secrets: [stripeSecretKey] },
+  async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const idToken = authHeader.split("Bearer ")[1];
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const userId = decodedToken.uid;
+
+      const { sellerId, amount, rentalId } = req.body;
+
+      if (!sellerId || !amount || !rentalId) {
+        res.status(400).json({ error: "sellerId, amount, and rentalId are required" });
+        return;
+      }
+
+      const stripe = getStripe(stripeSecretKey.value());
+
+      // Get seller's Connect account ID
+      const sellerDoc = await db.collection("users").doc(sellerId).get();
+      const sellerData = sellerDoc.data();
+      const sellerConnectAccountId = sellerData?.stripeConnectAccountId;
+
+      if (!sellerConnectAccountId) {
+        res.status(400).json({ error: "Seller has not set up a payout account" });
+        return;
+      }
+
+      // Check that the seller's account is active
+      const account = await stripe.accounts.retrieve(sellerConnectAccountId);
+      if (!account.charges_enabled || !account.payouts_enabled) {
+        res.status(400).json({ error: "Seller's payout account is not fully active" });
+        return;
+      }
+
+      // Calculate platform fee (10%)
+      const platformFeeAmount = Math.round(amount * (PLATFORM_FEE_PERCENT / 100));
+      const sellerAmount = amount - platformFeeAmount;
+
+      // Create a transfer to the seller's Connect account
+      const transfer = await stripe.transfers.create({
+        amount: sellerAmount,
+        currency: "usd",
+        destination: sellerConnectAccountId,
+        metadata: {
+          rentalId,
+          sellerId,
+          requestedBy: userId,
+          originalAmount: amount.toString(),
+          platformFee: platformFeeAmount.toString(),
+        },
+      });
+
+      // Record the payout in Firestore
+      await db.collection("payouts").add({
+        userId: sellerId,
+        rentalId,
+        amount: sellerAmount,
+        platformFee: platformFeeAmount,
+        originalAmount: amount,
+        currency: "usd",
+        stripeTransferId: transfer.id,
+        status: "completed",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`✅ Transfer processed: ${transfer.id} — $${(sellerAmount / 100).toFixed(2)} to ${sellerConnectAccountId}`);
+
+      res.json({
+        transferId: transfer.id,
+        amount: sellerAmount,
+        originalAmount: amount,
+        platformFee: platformFeeAmount,
+      });
+    } catch (error: any) {
+      console.error("processTransfer error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ============================================
 // IDENTITY VERIFICATION (ENHANCED)
 // ============================================
 

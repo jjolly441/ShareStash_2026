@@ -577,7 +577,10 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('EditProfile')}
+            >
               <Ionicons name="person-outline" size={24} color={Colors.text} />
               <Text style={styles.menuText}>Edit Profile</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
@@ -592,7 +595,10 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('MainTabs', { screen: 'Rentals' })}
+            >
               <Ionicons name="time-outline" size={24} color={Colors.text} />
               <Text style={styles.menuText}>Rental History</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />

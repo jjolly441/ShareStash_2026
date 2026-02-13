@@ -446,6 +446,23 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   const processPayment = async () => {
     if (!rental || !user || !selectedPaymentMethod) return;
 
+    // Issue #22: Guard against duplicate payment
+    if (rental.paymentStatus === 'paid' || rental.status === 'active') {
+      Alert.alert(
+        'Already Paid',
+        'This rental has already been paid for. Check your Rentals tab for details.',
+        [
+          {
+            text: 'View Rentals',
+            onPress: () => {
+              (navigation as any).navigate('MainTabs', { screen: 'Rentals' });
+            },
+          },
+        ]
+      );
+      return;
+    }
+
     setProcessing(true);
 
     try {
@@ -498,10 +515,15 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
       if (result.status === 'succeeded' || result.status === 'requires_capture') {
         await RentalService.startRental(rental.id || rentalId, result.paymentIntentId);
 
+        // Build success message with confirmation number if available
+        const confirmMsg = rental.confirmationNumber
+          ? `\n\nConfirmation #: ${rental.confirmationNumber}`
+          : '';
+
         // Success!
         Alert.alert(
           'Payment Successful! 🎉',
-          'Your rental has been confirmed. You can now arrange pickup with the owner.',
+          `Your rental has been confirmed. You can now arrange pickup with the owner.${confirmMsg}`,
           [
             {
               text: 'View Rentals',
@@ -540,6 +562,20 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
         Alert.alert('Card Declined', 'Your card was declined. Please try another card.');
       } else if (error.message?.includes('Seller has not set up payments')) {
         Alert.alert('Cannot Complete', 'The seller has not set up their payment account yet. Please contact them or try another listing.');
+      } else if (error.message?.includes('duplicate') || error.message?.includes('already been paid') || error.message?.includes('already active')) {
+        // Issue #22: Catch duplicate payment errors from server
+        Alert.alert(
+          'Already Paid',
+          'This rental has already been paid for. Check your Rentals tab for details.',
+          [
+            {
+              text: 'View Rentals',
+              onPress: () => {
+                (navigation as any).navigate('MainTabs', { screen: 'Rentals' });
+              },
+            },
+          ]
+        );
       } else {
         Alert.alert('Payment Failed', error.message || 'Payment processing failed. Please try again.');
       }
@@ -808,16 +844,18 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
         <TouchableOpacity
           style={[
             styles.payButton,
-            (!selectedPaymentMethod || processing) && styles.payButtonDisabled,
+            (!selectedPaymentMethod || processing || rental?.paymentStatus === 'paid' || rental?.status === 'active') && styles.payButtonDisabled,
           ]}
           onPress={handlePayNow}
-          disabled={!selectedPaymentMethod || processing}
+          disabled={!selectedPaymentMethod || processing || rental?.paymentStatus === 'paid' || rental?.status === 'active'}
         >
           {processing ? (
             <View style={styles.processingContainer}>
               <ActivityIndicator color={Colors.text} size="small" />
               <Text style={styles.payButtonText}>Processing...</Text>
             </View>
+          ) : rental?.paymentStatus === 'paid' || rental?.status === 'active' ? (
+            <Text style={styles.payButtonText}>Already Paid</Text>
           ) : (
             <Text style={styles.payButtonText}>Pay Now</Text>
           )}

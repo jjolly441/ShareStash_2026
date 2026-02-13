@@ -359,6 +359,16 @@ export default function RentalsScreen() {
             ${rental.totalPrice} total ({totalDays} {totalDays === 1 ? 'day' : 'days'})
           </Text>
 
+          {/* Confirmation Number */}
+          {rental.confirmationNumber && (
+            <View style={styles.confirmationRow}>
+              <Ionicons name="document-text-outline" size={16} color={Colors.secondary} />
+              <Text style={styles.confirmationText}>
+                Confirmation: {rental.confirmationNumber}
+              </Text>
+            </View>
+          )}
+
           {rental.message && (
             <View style={styles.messageBox}>
               <Text style={styles.messageLabel}>Message:</Text>
@@ -807,5 +817,16 @@ const styles = StyleSheet.create({
     color: Colors.text,
     opacity: 0.7,
     textAlign: 'center',
+  },
+  confirmationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 6,
+  },
+  confirmationText: {
+    fontSize: 13,
+    color: Colors.secondary,
+    fontWeight: '600',
   },
 });
