@@ -40,7 +40,7 @@ const WEB_BASE_URL = "https://peerrentalapp.web.app";
 // Helper: Create Stripe instance per request (required for v2)
 function getStripe(secretKey: string): Stripe {
   return new Stripe(secretKey, {
-    apiVersion: "2025-10-29.clover",
+    apiVersion: "2026-01-28.clover",
     typescript: true,
   });
 }
@@ -627,8 +627,8 @@ export const createPaymentIntent = onRequest(
         currency,
         customer: customerId,
         payment_method_types: ["card"],
-        transfer_data: { destination: sellerConnectAccountId },
-        application_fee_amount: platformFeeAmount,
+        // NO transfer_data — funds stay on platform until rental completes
+        // Transfer happens via processTransfer when owner marks rental complete
         metadata: {
           firebaseUserId: userId,
           rentalId,
@@ -636,6 +636,7 @@ export const createPaymentIntent = onRequest(
           itemName: itemName || "",
           sellerId,
           platformFee: platformFeeAmount.toString(),
+          sellerConnectAccountId, // Store for later transfer
         },
       };
 
@@ -718,7 +719,7 @@ export const createRefund = onRequest(
       const refundData: Stripe.RefundCreateParams = {
         payment_intent: finalPaymentIntentId,
         reason: reason as Stripe.RefundCreateParams.Reason,
-        refund_application_fee: true,
+        // No refund_application_fee — funds are held on platform, no app fee to reverse
         metadata: { requestedBy: userId, rentalId: rentalId || "" },
       };
 
@@ -753,21 +754,17 @@ export const createRefund = onRequest(
 );
 
 // ============================================
-// ISSUE #7 & #8 FIX: Add missing processTransfer Cloud Function
-// ============================================
-// ADD this function to functions/src/index.ts BEFORE the Identity Verification section
-// (i.e., after the createRefund function, around line 753)
-//
-// ROOT CAUSE: PayoutService.ts calls a Cloud Function named 'processTransfer'
-// but no such function exists in functions/src/index.ts. When the app calls the
-// non-existent endpoint, Firebase returns an HTML 404 page instead of JSON,
-// causing the "JSON parse error" (Issue #7). Since payouts fail, earnings
-// never update (Issue #8).
+// PROCESS TRANSFER - Release funds to seller on rental completion
 // ============================================
 
 /**
  * Process a transfer/payout to a seller's Connect account
- * Called by PayoutService.processRentalPayout()
+ * Called by PayoutService.processRentalPayout() when owner marks rental as complete.
+ * 
+ * PAYMENT FLOW:
+ * 1. Renter pays → funds held on platform (no destination charge)
+ * 2. Rental completes → this function transfers seller's share to their Connect account
+ * 3. Platform fee (10%) is retained on the platform automatically
  */
 export const processTransfer = onRequest(
   { ...httpsOptions, secrets: [stripeSecretKey] },
@@ -809,12 +806,17 @@ export const processTransfer = onRequest(
         return;
       }
 
-      // Calculate platform fee (10%)
+      // Get the rental to find the original payment intent
+      const rentalDoc = await db.collection("rentals").doc(rentalId).get();
+      const rentalData = rentalDoc.data();
+      const paymentIntentId = rentalData?.paymentIntentId;
+
+      // Calculate platform fee (10%) and seller amount
       const platformFeeAmount = Math.round(amount * (PLATFORM_FEE_PERCENT / 100));
       const sellerAmount = amount - platformFeeAmount;
 
-      // Create a transfer to the seller's Connect account
-      const transfer = await stripe.transfers.create({
+      // Build transfer params
+      const transferParams: Stripe.TransferCreateParams = {
         amount: sellerAmount,
         currency: "usd",
         destination: sellerConnectAccountId,
@@ -825,7 +827,25 @@ export const processTransfer = onRequest(
           originalAmount: amount.toString(),
           platformFee: platformFeeAmount.toString(),
         },
-      });
+      };
+
+      // Link transfer to the original charge via source_transaction
+      // This allows the transfer even if funds are still pending in the platform balance
+      if (paymentIntentId) {
+        try {
+          const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+          const chargeId = paymentIntent.latest_charge;
+          if (chargeId) {
+            transferParams.source_transaction = typeof chargeId === 'string' ? chargeId : chargeId.id;
+            console.log(`Using source_transaction: ${transferParams.source_transaction}`);
+          }
+        } catch (piError) {
+          console.warn("Could not retrieve payment intent for source_transaction, proceeding without it:", piError);
+        }
+      }
+
+      // Create a transfer to the seller's Connect account
+      const transfer = await stripe.transfers.create(transferParams);
 
       // Record the payout in Firestore
       await db.collection("payouts").add({

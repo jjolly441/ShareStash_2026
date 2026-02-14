@@ -81,6 +81,13 @@ async function callFunction<T>(functionName: string, data: any = {}): Promise<T>
     body: JSON.stringify(data),
   });
 
+  // Handle non-JSON responses (e.g. rate limiting, HTML error pages)
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(text || `Function ${functionName} returned non-JSON response`);
+  }
+
   const result = await response.json();
   
   if (!response.ok) {
@@ -128,11 +135,10 @@ class PayoutServiceClass {
 
       console.log('✅ Payout processed:', result.transferId);
       
-      // Find the payout document that was created
+      // Find the payout document that was created by processTransfer
       const q = query(
         this.payoutsCollection,
-        where('rentalId', '==', rentalId),
-        orderBy('createdAt', 'desc')
+        where('rentalId', '==', rentalId)
       );
       const snapshot = await getDocs(q);
       
@@ -159,12 +165,19 @@ class PayoutServiceClass {
       );
 
       const snapshot = await getDocs(q);
-      const payouts: Payout[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Payout));
+      const payouts: Payout[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Convert cents to dollars for display
+          amount: (data.amount || 0) / 100,
+          platformFee: (data.platformFee || 0) / 100,
+          originalAmount: (data.originalAmount || 0) / 100,
+        } as Payout;
+      });
 
-      // Calculate totals
+      // Calculate totals (now in dollars)
       const completedPayouts = payouts.filter(p => p.status === 'completed');
       const pendingPayoutsList = payouts.filter(
         p => p.status === 'pending' || p.status === 'processing'

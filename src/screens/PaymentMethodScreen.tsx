@@ -59,6 +59,13 @@ async function callFunction<T>(functionName: string, data: any = {}): Promise<T>
     body: JSON.stringify(data),
   });
 
+  // Handle non-JSON responses (e.g. rate limiting, HTML error pages)
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(text || `Function ${functionName} returned non-JSON response`);
+  }
+
   const result = await response.json();
   
   if (!response.ok) {
@@ -142,16 +149,7 @@ export default function PaymentMethodScreen({ navigation }: any) {
   // Initial load
   useEffect(() => {
     loadPaymentMethods();
-  }, [loadPaymentMethods]);
-
-  // Refresh on focus
-  useFocusEffect(
-    useCallback(() => {
-      if (!loading) {
-        loadPaymentMethods();
-      }
-    }, [loadPaymentMethods, loading])
-  );
+  }, []);
 
   // Pull to refresh
   const onRefresh = useCallback(() => {

@@ -115,13 +115,27 @@ export default function RentalsScreen() {
     
     for (const rental of rentals) {
       if (rental.status === 'completed' && rental.id) {
-        // Check if user has already reviewed this rental
-        const itemReview = await ReviewService.getReviewByRental(rental.id, user.id, 'item');
-        const userReview = await ReviewService.getReviewByRental(rental.id, user.id, 'user');
-        
-        // Mark as reviewed if either review exists
-        if (itemReview || userReview) {
-          reviewed.add(rental.id);
+        try {
+          const isRenter = rental.renterId === user.id;
+          
+          // For renter: check if they left an item review OR user review
+          // For owner: check if they left a user review (owners don't review items)
+          if (isRenter) {
+            const itemReview = await ReviewService.getReviewByRental(rental.id, user.id, 'item');
+            const userReview = await ReviewService.getReviewByRental(rental.id, user.id, 'user');
+            if (itemReview || userReview) {
+              reviewed.add(rental.id);
+            }
+          } else {
+            // Owner only leaves user reviews
+            const userReview = await ReviewService.getReviewByRental(rental.id, user.id, 'user');
+            if (userReview) {
+              reviewed.add(rental.id);
+            }
+          }
+        } catch (error) {
+          // Don't mark as reviewed if we can't check - let the button show
+          console.log('Error checking review status for rental:', rental.id, error);
         }
       }
     }

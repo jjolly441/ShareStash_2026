@@ -130,8 +130,32 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
     try {
       const itemReviews = await ReviewService.getItemReviews(itemId);
       const stats = await ReviewService.getItemStats(itemId);
-      setReviews(itemReviews);
-      setReviewStats(stats);
+      
+      // Also load user reviews for the owner so both types are visible
+      if (item?.ownerId) {
+        const ownerReviews = await ReviewService.getUserReviews(item.ownerId);
+        // Combine both, with item reviews first
+        setReviews([...itemReviews, ...ownerReviews]);
+        
+        // Merge stats if owner has reviews too
+        const ownerStats = await ReviewService.getUserStats(item.ownerId);
+        if (stats && ownerStats) {
+          const combinedTotal = stats.totalReviews + ownerStats.totalReviews;
+          const combinedAvg = combinedTotal > 0 
+            ? ((stats.averageRating * stats.totalReviews) + (ownerStats.averageRating * ownerStats.totalReviews)) / combinedTotal
+            : 0;
+          setReviewStats({
+            ...stats,
+            averageRating: combinedAvg,
+            totalReviews: combinedTotal,
+          });
+        } else {
+          setReviewStats(stats || ownerStats);
+        }
+      } else {
+        setReviews(itemReviews);
+        setReviewStats(stats);
+      }
     } catch (error) {
       console.error('Error loading reviews:', error);
     }
@@ -243,7 +267,14 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
           <Ionicons name="person" size={20} color={Colors.white} />
         </View>
         <View style={styles.reviewerInfo}>
-          <Text style={styles.reviewerName}>{review.reviewerName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={styles.reviewerName}>{review.reviewerName}</Text>
+            <View style={{ backgroundColor: review.reviewType === 'item' ? Colors.secondary + '20' : Colors.primary + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+              <Text style={{ fontSize: 11, color: review.reviewType === 'item' ? Colors.secondary : Colors.primary, fontWeight: '600' }}>
+                {review.reviewType === 'item' ? 'Item' : 'Owner'}
+              </Text>
+            </View>
+          </View>
           <View style={styles.reviewMeta}>
             <StarRating rating={review.rating} size={14} />
             <Text style={styles.reviewDate}> · {formatDate(review.createdAt.toString())}</Text>
