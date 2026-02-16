@@ -8,7 +8,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Alert,
@@ -18,6 +17,7 @@ import {
   AppState,
   AppStateStatus,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
@@ -28,12 +28,13 @@ import { RootStackParamList } from '../types/navigation';
 import { AuthContext } from '../contexts/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import SettingsService from '../services/SettingsService';
+import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const FUNCTIONS_BASE_URL = 'https://us-central1-peerrentalapp.cloudfunctions.net';
 
 // ============================================================================
 // TYPES
@@ -110,7 +111,6 @@ type CheckoutScreenProps = {
 // CONSTANTS
 // ============================================================================
 
-const PLATFORM_FEE_PERCENT = 0.10; // 10% platform fee
 const IDENTITY_VERIFICATION_THRESHOLD = 50000; // $500 in cents
 const IDENTITY_VERIFICATION_THRESHOLD_DOLLARS = 500;
 
@@ -221,6 +221,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   // Verification state
   const [isVerified, setIsVerified] = useState<boolean | null>(null);
   const [checkingVerification, setCheckingVerification] = useState(true);
+  const [feePercent, setFeePercent] = useState(0.10); // default 10%, loaded from settings
   
   // FIXED: Use ref to prevent multiple simultaneous checks
   const isCheckingRef = useRef(false);
@@ -337,6 +338,8 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   // Initial load
   useEffect(() => {
     loadCheckoutData();
+    // Load dynamic service fee from settings
+    SettingsService.getServiceFeeDecimal().then(fee => setFeePercent(fee)).catch(() => {});
   }, []);
 
   // Refresh when returning from PaymentMethodScreen or VerifyIdentity
@@ -638,7 +641,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
     if (!rental) return { subtotal: 0, platformFee: 0, total: 0 };
 
     const total = rental.totalPrice;
-    const platformFee = total * PLATFORM_FEE_PERCENT;
+    const platformFee = total * feePercent;
     const subtotal = total - platformFee;
 
     return { subtotal, platformFee, total };
@@ -732,7 +735,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
               <View style={styles.datesContainer}>
                 <Ionicons name="calendar-outline" size={16} color={Colors.text} />
                 <Text style={styles.datesText}>
-                  {new Date(rental.startDate).toLocaleDateString()} - {new Date(rental.endDate).toLocaleDateString()}
+                  {(rental.startDate as any)?.toDate ? (rental.startDate as any).toDate().toLocaleDateString() : new Date(rental.startDate).toLocaleDateString()} - {(rental.endDate as any)?.toDate ? (rental.endDate as any).toDate().toLocaleDateString() : new Date(rental.endDate).toLocaleDateString()}
                 </Text>
               </View>
             </View>
@@ -779,7 +782,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Service Fee (10%)</Text>
+            <Text style={styles.priceLabel}>Service Fee ({Math.round(feePercent * 100)}%)</Text>
             <Text style={styles.priceValue}>${platformFee.toFixed(2)}</Text>
           </View>
 

@@ -16,6 +16,7 @@
  */
 
 import { onRequest, HttpsOptions } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import Stripe from "stripe";
@@ -28,11 +29,32 @@ const db = admin.firestore();
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 const stripeIdentityWebhookSecret = defineSecret("STRIPE_IDENTITY_WEBHOOK_SECRET");
+const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 // Constants
-const PLATFORM_FEE_PERCENT = 10;
+const DEFAULT_PLATFORM_FEE_PERCENT = 10; // Fallback if Firestore unavailable
+const PLATFORM_FEE_PERCENT = DEFAULT_PLATFORM_FEE_PERCENT; // Legacy reference
 const IDENTITY_VERIFICATION_THRESHOLD_CENTS = 50000; // $500
 const MAX_VERIFICATION_ATTEMPTS = 3; // NEW: Max retry attempts for identity verification
+
+/**
+ * Get the current platform fee percentage from Firestore settings.
+ * Falls back to DEFAULT_PLATFORM_FEE_PERCENT if unavailable.
+ */
+async function getPlatformFeePercent(): Promise<number> {
+  try {
+    const settingsDoc = await db.collection("settings").doc("platform").get();
+    if (settingsDoc.exists) {
+      const data = settingsDoc.data();
+      if (data?.serviceFeePercent !== undefined && data.serviceFeePercent >= 0 && data.serviceFeePercent <= 50) {
+        return data.serviceFeePercent;
+      }
+    }
+  } catch (error) {
+    console.warn("Could not read platform fee from settings, using default:", error);
+  }
+  return DEFAULT_PLATFORM_FEE_PERCENT;
+}
 
 // Your Firebase Hosting URL (or custom domain)
 const WEB_BASE_URL = "https://peerrentalapp.web.app";
@@ -604,7 +626,8 @@ export const createPaymentIntent = onRequest(
       }
 
       // Calculate fees
-      const platformFeeAmount = Math.round(amount * (PLATFORM_FEE_PERCENT / 100));
+      const feePercent = await getPlatformFeePercent();
+      const platformFeeAmount = Math.round(amount * (feePercent / 100));
       const requiresIdentityVerification = amount >= IDENTITY_VERIFICATION_THRESHOLD_CENTS;
 
       // Check if identity verification is required and not completed
@@ -811,8 +834,9 @@ export const processTransfer = onRequest(
       const rentalData = rentalDoc.data();
       const paymentIntentId = rentalData?.paymentIntentId;
 
-      // Calculate platform fee (10%) and seller amount
-      const platformFeeAmount = Math.round(amount * (PLATFORM_FEE_PERCENT / 100));
+      // Calculate platform fee and seller amount
+      const feePercent = await getPlatformFeePercent();
+      const platformFeeAmount = Math.round(amount * (feePercent / 100));
       const sellerAmount = amount - platformFeeAmount;
 
       // Build transfer params
@@ -1290,6 +1314,328 @@ export const stripeIdentityWebhook = onRequest(
     } catch (error: any) {
       console.error("Identity webhook handler error:", error);
       res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ============================================
+// SCHEDULED FUNCTIONS — FRAUD PROTECTION
+// ============================================
+
+/**
+ * LAYER 3: Process eligible payouts after 48-hour dispute window
+ * Runs every hour to check for rentals whose payout window has expired
+ */
+export const processEligiblePayouts = onSchedule(
+  {
+    schedule: "every 60 minutes",
+    region: "us-central1",
+    secrets: [stripeSecretKey],
+  },
+  async () => {
+    try {
+      // Find rentals in completed_pending_payout where payoutEligibleAt has passed and not frozen
+      const snapshot = await db
+        .collection("rentals")
+        .where("status", "==", "completed_pending_payout")
+        .where("payoutFrozen", "==", false)
+        .where("payoutEligibleAt", "<=", admin.firestore.Timestamp.now())
+        .get();
+
+      console.log(`Found ${snapshot.size} rentals eligible for payout`);
+
+      for (const rentalDoc of snapshot.docs) {
+        const rental = rentalDoc.data();
+        const rentalId = rentalDoc.id;
+
+        try {
+          // Get owner's Stripe account
+          const ownerDoc = await db.collection("users").doc(rental.ownerId).get();
+          const ownerData = ownerDoc.data();
+          const ownerStripeAccountId = ownerData?.stripeConnectAccountId;
+
+          if (!ownerStripeAccountId) {
+            console.log(`Owner ${rental.ownerId} has no Stripe account, marking payout pending`);
+            await rentalDoc.ref.update({
+              status: "completed",
+              payoutStatus: "pending",
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            continue;
+          }
+
+          const stripe = getStripe(stripeSecretKey.value());
+
+          // Calculate amounts
+          const amount = rental.totalPrice;
+          const amountCents = Math.round(amount * 100);
+          const feePercent = await getPlatformFeePercent();
+          const platformFeeAmount = Math.round(amountCents * (feePercent / 100));
+          const sellerAmount = amountCents - platformFeeAmount;
+
+          // Build transfer
+          const transferParams: Stripe.TransferCreateParams = {
+            amount: sellerAmount,
+            currency: "usd",
+            destination: ownerStripeAccountId,
+            metadata: {
+              rentalId,
+              sellerId: rental.ownerId,
+              type: "scheduled_payout",
+            },
+          };
+
+          // Link to original charge
+          if (rental.paymentIntentId) {
+            try {
+              const pi = await stripe.paymentIntents.retrieve(rental.paymentIntentId);
+              const chargeId = pi.latest_charge;
+              if (chargeId) {
+                transferParams.source_transaction = typeof chargeId === "string" ? chargeId : chargeId.id;
+              }
+            } catch (piErr) {
+              console.warn("Could not retrieve PI for source_transaction:", piErr);
+            }
+          }
+
+          const transfer = await stripe.transfers.create(transferParams);
+
+          // Record payout
+          await db.collection("payouts").add({
+            userId: rental.ownerId,
+            rentalId,
+            amount: sellerAmount,
+            platformFee: platformFeeAmount,
+            originalAmount: amountCents,
+            currency: "usd",
+            stripeTransferId: transfer.id,
+            status: "completed",
+            type: "scheduled",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Update rental to final completed
+          await rentalDoc.ref.update({
+            status: "completed",
+            payoutId: transfer.id,
+            payoutStatus: "completed",
+            payoutProcessedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          console.log(`✅ Scheduled payout processed for rental ${rentalId}: ${transfer.id}`);
+        } catch (rentalError: any) {
+          console.error(`Failed to process payout for rental ${rentalId}:`, rentalError);
+          await rentalDoc.ref.update({ payoutStatus: "failed" });
+        }
+      }
+    } catch (error: any) {
+      console.error("processEligiblePayouts error:", error);
+    }
+  }
+);
+
+/**
+ * LAYER 4: Auto-complete rentals + send reminders
+ * Runs daily to:
+ * 1. Send reminder at day 1 and day 2 after endDate if renter hasn't confirmed
+ * 2. Auto-complete at day 3 if still in pending_completion
+ */
+export const autoCompleteRentals = onSchedule(
+  {
+    schedule: "every 24 hours",
+    region: "us-central1",
+  },
+  async () => {
+    try {
+      // Find all rentals stuck in pending_completion
+      const snapshot = await db
+        .collection("rentals")
+        .where("status", "==", "pending_completion")
+        .get();
+
+      console.log(`Found ${snapshot.size} rentals in pending_completion`);
+
+      for (const rentalDoc of snapshot.docs) {
+        const rental = rentalDoc.data();
+        const rentalId = rentalDoc.id;
+
+        const autoCompleteAt = rental.autoCompleteAt?.toDate?.() || null;
+        if (!autoCompleteAt) continue;
+
+        const nowDate = new Date();
+        const reminders = rental.autoCompleteReminders || 0;
+
+        // Calculate days since owner marked complete
+        const endDate = rental.endDate?.toDate?.() || new Date(rental.endDate);
+        const daysSinceEnd = (nowDate.getTime() - endDate.getTime()) / (1000 * 60 * 60 * 24);
+
+        // AUTO-COMPLETE: 3+ days past end date
+        if (nowDate >= autoCompleteAt) {
+          console.log(`Auto-completing rental ${rentalId} (${Math.floor(daysSinceEnd)} days past end date)`);
+
+          const payoutEligibleDate = new Date(nowDate.getTime() + 48 * 60 * 60 * 1000);
+
+          await rentalDoc.ref.update({
+            renterConfirmedReturn: true,
+            status: "completed_pending_payout",
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+            payoutEligibleAt: admin.firestore.Timestamp.fromDate(payoutEligibleDate),
+            payoutFrozen: false,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Notify both
+          await db.collection("notifications").add({
+            userId: rental.renterId,
+            title: "⏰ Rental Auto-Completed",
+            body: `Your rental of "${rental.itemName}" was automatically completed because the return was not confirmed within 3 days.`,
+            data: { type: "rental_auto_completed", rentalId, screen: "Rentals" },
+            read: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          await db.collection("notifications").add({
+            userId: rental.ownerId,
+            title: "⏰ Rental Auto-Completed",
+            body: `The rental of "${rental.itemName}" was automatically completed. Payout will process in 48 hours.`,
+            data: { type: "rental_auto_completed", rentalId, screen: "Rentals" },
+            read: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          continue;
+        }
+
+        // REMINDER at day 1 (reminders === 0, daysSinceEnd >= 1)
+        if (reminders === 0 && daysSinceEnd >= 1) {
+          console.log(`Sending day-1 reminder for rental ${rentalId}`);
+
+          await db.collection("notifications").add({
+            userId: rental.renterId,
+            title: "📦 Reminder: Confirm Return",
+            body: `Please confirm the return of "${rental.itemName}". The rental will auto-complete in 2 days if not confirmed.`,
+            data: { type: "return_reminder", rentalId, screen: "Rentals" },
+            read: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          await rentalDoc.ref.update({ autoCompleteReminders: 1 });
+          continue;
+        }
+
+        // REMINDER at day 2 (reminders === 1, daysSinceEnd >= 2)
+        if (reminders === 1 && daysSinceEnd >= 2) {
+          console.log(`Sending day-2 reminder for rental ${rentalId}`);
+
+          await db.collection("notifications").add({
+            userId: rental.renterId,
+            title: "⚠️ Final Reminder: Confirm Return",
+            body: `This is your final reminder to confirm the return of "${rental.itemName}". It will auto-complete tomorrow.`,
+            data: { type: "return_reminder_final", rentalId, screen: "Rentals" },
+            read: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          await rentalDoc.ref.update({ autoCompleteReminders: 2 });
+        }
+      }
+    } catch (error: any) {
+      console.error("autoCompleteRentals error:", error);
+    }
+  }
+);
+
+// ============================================
+// AI SUPPORT CHATBOT (Claude-powered)
+// ============================================
+
+const SUPPORT_SYSTEM_PROMPT = `You are ShareStash Support, a friendly and helpful AI assistant for the ShareStash peer-to-peer rental marketplace app. Your role is to help users with questions about the app, rental process, payments, disputes, and account issues.
+
+KEY INFORMATION ABOUT SHARESTASH:
+- ShareStash connects item owners with renters for peer-to-peer item rentals
+- Platform fee: 10% deducted from the owner's payout
+- Payments processed through Stripe; payouts via Stripe Connect
+- Identity verification (Stripe Identity) required for rentals over $500
+- Rental flow: Request → Owner Approves → Renter Pays → Active → Owner marks complete → Renter confirms return → 48h dispute window → Payout processed
+- Cancellation policy: Full refund if cancelled 24+ hours before start date; no refund within 24 hours
+- The 48-hour dispute window freezes payouts if a dispute is filed
+- Auto-complete: If renter doesn't confirm return within 3 days after end date, rental auto-completes
+- Photo handoff feature: Both parties photograph item condition at pick-up and return
+- Meeting location feature: Either party can propose a handoff location; other party accepts or suggests different
+- Dispute process: File via "Report Issue" button; admin reviews; payout frozen during review
+- Users can leave reviews after rental completion
+- Support email: support@sharestash.app
+
+GUIDELINES:
+- Be concise, friendly, and helpful
+- If you don't know something specific about the user's account, suggest they contact support@sharestash.app
+- Never make up features or policies that don't exist
+- Guide users step-by-step when explaining how to do something in the app
+- If a user seems frustrated, be empathetic and focus on solving their problem
+- Keep responses short (2-4 sentences) unless the user asks for detailed explanation
+- Do not discuss competitor apps or services`;
+
+export const chatWithSupport = onRequest(
+  { ...httpsOptions, secrets: [anthropicApiKey] },
+  async (req, res) => {
+    try {
+      // Verify authentication
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const idToken = authHeader.split("Bearer ")[1];
+      await admin.auth().verifyIdToken(idToken);
+
+      const { messages } = req.body;
+
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        res.status(400).json({ error: "messages array is required" });
+        return;
+      }
+
+      // Call Anthropic API
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicApiKey.value(),
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 512,
+          system: SUPPORT_SYSTEM_PROMPT,
+          messages: messages.slice(-20), // Last 20 messages for context
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error("Anthropic API error:", response.status, errorBody);
+        res.status(502).json({ error: "AI service temporarily unavailable" });
+        return;
+      }
+
+      const data = await response.json();
+      const assistantMessage = data.content
+        ?.map((block: any) => (block.type === "text" ? block.text : ""))
+        .filter(Boolean)
+        .join("\n");
+
+      if (!assistantMessage) {
+        res.status(502).json({ error: "No response from AI service" });
+        return;
+      }
+
+      res.json({ message: assistantMessage });
+    } catch (error: any) {
+      console.error("chatWithSupport error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 );

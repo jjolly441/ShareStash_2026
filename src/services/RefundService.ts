@@ -13,12 +13,12 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
+import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const FUNCTIONS_BASE_URL = 'https://us-central1-peerrentalapp.cloudfunctions.net';
 
 // ============================================================================
 // HTTP HELPER

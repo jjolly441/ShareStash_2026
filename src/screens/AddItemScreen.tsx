@@ -5,7 +5,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -13,6 +12,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -44,6 +44,9 @@ interface ItemData {
   description: string;
   category: string;
   pricePerDay: string;
+  pricePerHour: string;
+  pricePerWeek: string;
+  pricePerMonth: string;
   image: string | null;
   location: {
     address: string;
@@ -153,6 +156,9 @@ export default function AddItemScreen({ route }: any) {
     description: '',
     category: '',
     pricePerDay: '',
+    pricePerHour: '',
+    pricePerWeek: '',
+    pricePerMonth: '',
     image: null,
     location: {
       address: '',
@@ -219,6 +225,9 @@ export default function AddItemScreen({ route }: any) {
           description: existingItem.description,
           category: existingItem.category,
           pricePerDay: existingItem.pricePerDay.toString(),
+          pricePerHour: existingItem.pricePerHour?.toString() || '',
+          pricePerWeek: existingItem.pricePerWeek?.toString() || '',
+          pricePerMonth: existingItem.pricePerMonth?.toString() || '',
           image: existingItem.image,
           location: existingItem.location || {
             address: '',
@@ -456,6 +465,9 @@ export default function AddItemScreen({ route }: any) {
           description: itemData.description.trim(),
           category: itemData.category,
           pricePerDay: parseFloat(itemData.pricePerDay),
+          ...(itemData.pricePerHour ? { pricePerHour: parseFloat(itemData.pricePerHour) } : {}),
+          ...(itemData.pricePerWeek ? { pricePerWeek: parseFloat(itemData.pricePerWeek) } : {}),
+          ...(itemData.pricePerMonth ? { pricePerMonth: parseFloat(itemData.pricePerMonth) } : {}),
           image: itemData.image!,
           isAvailable: true,
           location: itemData.location,
@@ -477,6 +489,9 @@ export default function AddItemScreen({ route }: any) {
           description: itemData.description.trim(),
           category: itemData.category,
           pricePerDay: parseFloat(itemData.pricePerDay),
+          ...(itemData.pricePerHour ? { pricePerHour: parseFloat(itemData.pricePerHour) } : {}),
+          ...(itemData.pricePerWeek ? { pricePerWeek: parseFloat(itemData.pricePerWeek) } : {}),
+          ...(itemData.pricePerMonth ? { pricePerMonth: parseFloat(itemData.pricePerMonth) } : {}),
           image: itemData.image!,
           ownerId: user.id,
           ownerName: `${user.firstName} ${user.lastName}`,
@@ -498,6 +513,9 @@ export default function AddItemScreen({ route }: any) {
                     description: '',
                     category: '',
                     pricePerDay: '',
+                    pricePerHour: '',
+                    pricePerWeek: '',
+                    pricePerMonth: '',
                     image: null,
                     location: {
                       address: '',
@@ -793,6 +811,52 @@ export default function AddItemScreen({ route }: any) {
                   placeholder="0.00"
                   keyboardType="numeric"
                 />
+              </View>
+            </View>
+
+            <Text style={[styles.label, { marginTop: 12, marginBottom: 8, color: '#666' }]}>
+              Optional: Set custom rates for other rental periods
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.label, { fontSize: 13 }]}>Per Hour</Text>
+                <View style={styles.priceInputContainer}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={itemData.pricePerHour}
+                    onChangeText={(value) => updateField('pricePerHour', value)}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.label, { fontSize: 13 }]}>Per Week</Text>
+                <View style={styles.priceInputContainer}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={itemData.pricePerWeek}
+                    onChangeText={(value) => updateField('pricePerWeek', value)}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.label, { fontSize: 13 }]}>Per Month</Text>
+                <View style={styles.priceInputContainer}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={itemData.pricePerMonth}
+                    onChangeText={(value) => updateField('pricePerMonth', value)}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                  />
+                </View>
               </View>
             </View>
           </View>

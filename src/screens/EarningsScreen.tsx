@@ -16,6 +16,7 @@ import { PayoutService, OwnerEarnings, Payout } from '../services/PayoutService'
 import { auth } from '../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import SettingsService from '../services/SettingsService';
 
 export default function EarningsScreen({ navigation }: any) {
   const [earnings, setEarnings] = useState<OwnerEarnings | null>(null);
@@ -23,10 +24,12 @@ export default function EarningsScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [accountStatus, setAccountStatus] = useState<any>(null);
+  const [feeLabel, setFeeLabel] = useState('10%');
 
   useEffect(() => {
     loadEarnings();
     checkStripeAccount();
+    SettingsService.getSettings().then(s => setFeeLabel(`${s.serviceFeePercent}%`)).catch(() => {});
   }, []);
 
   const checkStripeAccount = async () => {
@@ -221,7 +224,7 @@ export default function EarningsScreen({ navigation }: any) {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={20} color="#007AFF" />
           <Text style={styles.infoText}>
-            Payouts are automatically processed when rentals are completed. We charge a 10% platform fee.
+            Payouts are automatically processed when rentals are completed. We charge a {feeLabel} platform fee.
           </Text>
         </View>
       </ScrollView>

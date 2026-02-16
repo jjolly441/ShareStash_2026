@@ -13,12 +13,12 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
+import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const FUNCTIONS_BASE_URL = 'https://us-central1-peerrentalapp.cloudfunctions.net';
 
 // ============================================================================
 // TYPES
@@ -136,8 +136,10 @@ class PayoutServiceClass {
       console.log('✅ Payout processed:', result.transferId);
       
       // Find the payout document that was created by processTransfer
+      // Must include userId constraint to satisfy Firestore security rules
       const q = query(
         this.payoutsCollection,
+        where('userId', '==', ownerId),
         where('rentalId', '==', rentalId)
       );
       const snapshot = await getDocs(q);

@@ -6,6 +6,9 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   
+  // Onboarding
+  Onboarding: undefined;
+
   // Main tabs
   MainTabs: undefined;
   Home: undefined;
@@ -64,8 +67,28 @@ export type RootStackParamList = {
   // Notifications
   Notifications: undefined;
 
+  // Handoff (Pick-up & Return)
+  Handoff: {
+    rentalId: string;
+    mode: 'pickup' | 'return';
+  };
+
+  // Meeting Location
+  MeetingLocation: {
+    rentalId: string;
+  };
+
+  // Legal & Support
+  PrivacyPolicy: undefined;
+  TermsOfService: undefined;
+  HelpCenter: undefined;
+  SupportChat: undefined;
+
   // Edit Profile (Issue #18)
   EditProfile: undefined;
+
+  // Wishlist / Saved Items
+  Wishlist: undefined;
 
   // Public Profile (Issue #16)
   PublicProfile: {

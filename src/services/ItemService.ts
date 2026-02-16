@@ -22,6 +22,9 @@ export interface RentalItem {
   description: string;
   category: string;
   pricePerDay: number;
+  pricePerHour?: number;
+  pricePerWeek?: number;
+  pricePerMonth?: number;
   image: string;
   ownerId: string;
   ownerName: string;

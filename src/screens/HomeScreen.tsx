@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   FlatList,
   TouchableOpacity,
   Image,
@@ -14,12 +13,14 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import Slider from '@react-native-community/slider';
 import { StackNavigationProp } from '@react-navigation/stack';
 import ItemService, { RentalItem } from '../services/ItemService';
+import WishlistService from '../services/WishlistService';
 import { AuthContext } from '../contexts/AuthContext';
 
 // Verification Banner - encourages unverified users to verify
@@ -60,12 +61,21 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const [locationPermission, setLocationPermission] = useState(false);
   const mapRef = useRef<MapView>(null);
   const { user } = useContext(AuthContext);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   const categories = ['All', ...ItemService.getCategories()];
 
   useEffect(() => {
     requestLocationPermission();
   }, []);
+
+  // Subscribe to wishlist changes
+  useEffect(() => {
+    if (user?.id) {
+      WishlistService.subscribe(user.id, (ids) => setFavoriteIds(new Set(ids)));
+    }
+    return () => WishlistService.unsubscribeAll();
+  }, [user?.id]);
 
   useEffect(() => {
     loadItems();
@@ -223,9 +233,35 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
     </TouchableOpacity>
   );
 
-  const renderItem = ({ item }: { item: ItemWithDistance }) => (
+  const handleToggleFavorite = async (itemId: string) => {
+    if (!user?.id) return;
+    try {
+      await WishlistService.toggleWishlist(user.id, itemId);
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+    }
+  };
+
+  const renderItem = ({ item }: { item: ItemWithDistance }) => {
+    const isOwn = item.ownerId === user?.id;
+    const isFav = favoriteIds.has(item.id);
+    return (
     <TouchableOpacity style={styles.itemCard} onPress={() => handleItemPress(item)}>
-      <Image source={{ uri: item.image }} style={styles.itemImage} />
+      <View>
+        <Image source={{ uri: item.image }} style={styles.itemImage} />
+        {!isOwn && (
+          <TouchableOpacity
+            style={styles.heartButton}
+            onPress={() => handleToggleFavorite(item.id)}
+          >
+            <Ionicons
+              name={isFav ? 'heart' : 'heart-outline'}
+              size={20}
+              color={isFav ? '#EF4444' : Colors.white}
+            />
+          </TouchableOpacity>
+        )}
+      </View>
       <View style={styles.itemInfo}>
         <Text style={styles.itemTitle}>{item.title}</Text>
         <Text style={styles.itemCategory}>{item.category}</Text>
@@ -250,6 +286,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
       </View>
     </TouchableOpacity>
   );
+  };
 
   // List header component that includes the Verification Banner
   const renderListHeader = () => (
@@ -568,6 +605,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 200,
     backgroundColor: Colors.background,
+  },
+  heartButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemInfo: {
     padding: 16,

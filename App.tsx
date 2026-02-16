@@ -4,7 +4,7 @@
 // ADDED: MyItemsScreen for managing user's items
 // FIXED: AddItemScreen type error in Tab Navigator
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Linking, Alert } from 'react-native';
 import { NavigationContainer, LinkingOptions, NavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -18,7 +18,8 @@ import * as Notifications from 'expo-notifications';
 // Configure foreground notification behavior - show banner even when app is open
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -50,6 +51,14 @@ import NotificationsScreen from './src/screens/NotificationScreens';
 import MyItemsScreen from './src/screens/MyItemsScreen';
 import EditProfileScreen from './src/screens/EditProfileScreen';
 import PublicProfileScreen from './src/screens/PublicProfileScreen';
+import HandoffScreen from './src/screens/HandoffScreen';
+import MeetingLocationScreen from './src/screens/MeetingLocationScreen';
+import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
+import HelpCenterScreen from './src/screens/HelpCenterScreen';
+import SupportChatScreen from './src/screens/SupportChatScreen';
+import WishlistScreen from './src/screens/WishlistScreen';
+import OnboardingScreen, { hasCompletedOnboarding } from './src/screens/OnboardingScreen';
 
 // Verification hook for abandoned verification reminders
 import { useVerificationReminder } from './src/hooks/useVerification';
@@ -176,6 +185,16 @@ export default function App() {
 function AppContent() {
   const { user, loading } = React.useContext(AuthContext);
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+
+  // Check onboarding status when user logs in
+  useEffect(() => {
+    if (user) {
+      hasCompletedOnboarding().then(done => setOnboardingDone(done));
+    } else {
+      setOnboardingDone(null);
+    }
+  }, [user]);
 
   // Initialize notifications
   useEffect(() => {
@@ -273,7 +292,7 @@ function AppContent() {
     };
   }, []);
 
-  if (loading) {
+  if (loading || (user && onboardingDone === null)) {
     return null;
   }
 
@@ -297,6 +316,9 @@ function AppContent() {
           </>
         ) : (
           <>
+            {!onboardingDone && (
+              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            )}
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="ItemDetails" component={ItemDetailsScreen} />
             <Stack.Screen name="BookItem" component={BookItemScreen} />
@@ -316,6 +338,13 @@ function AppContent() {
             <Stack.Screen name="MyDisputes" component={MyDisputesScreen} />
             <Stack.Screen name="DisputeDetails" component={DisputeDetailsScreen} />
             <Stack.Screen name="CreateReview" component={CreateReviewScreen} />
+            <Stack.Screen name="Handoff" component={HandoffScreen} />
+            <Stack.Screen name="MeetingLocation" component={MeetingLocationScreen} />
+            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+            <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+            <Stack.Screen name="HelpCenter" component={HelpCenterScreen} />
+            <Stack.Screen name="SupportChat" component={SupportChatScreen} />
+            <Stack.Screen name="Wishlist" component={WishlistScreen} />
             
             {/* Identity Verification Screen */}
             <Stack.Screen 

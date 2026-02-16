@@ -6,12 +6,12 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Alert,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../contexts/AuthContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -23,6 +23,7 @@ import {
   VerificationService,
   VerificationStatus,
 } from '../services/VerificationService';
+import { resetOnboarding } from './OnboardingScreen';
 
 
 // ============================================================================
@@ -595,6 +596,15 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('Wishlist')}
+            >
+              <Ionicons name="heart-outline" size={24} color="#EF4444" />
+              <Text style={styles.menuText}>Saved Items</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.text} />
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => navigation.navigate('MainTabs', { screen: 'Rentals' })}
@@ -651,7 +661,10 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Support</Text>
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('HelpCenter')}
+            >
               <Ionicons
                 name="help-circle-outline"
                 size={24}
@@ -661,13 +674,54 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={async () => {
+                await resetOnboarding();
+                navigation.navigate('Onboarding');
+              }}
+            >
+              <Ionicons name="school-outline" size={24} color={Colors.text} />
+              <Text style={styles.menuText}>App Tutorial</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('SupportChat')}
+            >
+              <Ionicons
+                name="chatbubbles-outline"
+                size={24}
+                color={Colors.text}
+              />
+              <Text style={styles.menuText}>Chat with AI Support</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('PrivacyPolicy')}
+            >
               <Ionicons
                 name="shield-checkmark-outline"
                 size={24}
                 color={Colors.text}
               />
               <Text style={styles.menuText}>Privacy Policy</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('TermsOfService')}
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={24}
+                color={Colors.text}
+              />
+              <Text style={styles.menuText}>Terms of Service</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
           </View>

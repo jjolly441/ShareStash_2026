@@ -32,6 +32,7 @@ import DisputeService, { Dispute } from '../services/DisputeService';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { runAllMigrations } from '../scripts/migrateRentals'; // NEW IMPORT
 import NotificationService from '../services/NotificationService'; // Issue #13: Blast messages
+import SettingsService from '../services/SettingsService';
 
 
 const Colors = {
@@ -124,6 +125,12 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   const [rentals, setRentals] = useState<Rental[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
 
+  // Service fee controls
+  const [currentFeePercent, setCurrentFeePercent] = useState<number>(10);
+  const [feeInput, setFeeInput] = useState<string>('10');
+  const [feeSaving, setFeeSaving] = useState(false);
+  const [feeLastUpdated, setFeeLastUpdated] = useState<string | null>(null);
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -195,6 +202,21 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
         newUsersThisMonth: newUsersCount,
         openDisputes: openDisputesCount,
       });
+
+      // Fetch platform settings (service fee)
+      try {
+        const settings = await SettingsService.getSettings(true);
+        setCurrentFeePercent(settings.serviceFeePercent);
+        setFeeInput(settings.serviceFeePercent.toString());
+        if (settings.updatedAt) {
+          const date = (settings.updatedAt as any).toDate
+            ? (settings.updatedAt as any).toDate()
+            : new Date(settings.updatedAt as any);
+          setFeeLastUpdated(date.toLocaleDateString());
+        }
+      } catch (settingsErr) {
+        console.error('Error fetching settings:', settingsErr);
+      }
 
       setLoading(false);
     } catch (error) {
@@ -475,6 +497,49 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   };
 
   // Render components
+  // Service fee handler
+  const handleSaveFee = async () => {
+    const newFee = parseFloat(feeInput);
+    if (isNaN(newFee) || newFee < 0 || newFee > 50) {
+      Alert.alert('Invalid Fee', 'Please enter a fee between 0% and 50%.');
+      return;
+    }
+
+    if (newFee === currentFeePercent) {
+      Alert.alert('No Change', 'The fee is already set to this value.');
+      return;
+    }
+
+    Alert.alert(
+      'Update Service Fee',
+      `Change the platform service fee from ${currentFeePercent}% to ${newFee}%?\n\nThis will affect all future transactions.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            try {
+              setFeeSaving(true);
+              await SettingsService.updateSettings(
+                { serviceFeePercent: newFee },
+                user?.id || 'admin'
+              );
+              setCurrentFeePercent(newFee);
+              setFeeLastUpdated(new Date().toLocaleDateString());
+              Alert.alert('Success', `Service fee updated to ${newFee}%.`);
+            } catch (error: any) {
+              console.error('Error saving fee:', error);
+              Alert.alert('Error', 'Failed to update service fee.');
+              setFeeInput(currentFeePercent.toString());
+            } finally {
+              setFeeSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const StatCard = ({ icon, label, value, color }: any) => (
     <View style={[styles.statCard, { backgroundColor: color }]}>
       <Ionicons name={icon} size={28} color={Colors.white} />
@@ -589,6 +654,74 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
             <Ionicons name="chevron-forward" size={24} color={Colors.admin} />
           </View>
         </TouchableOpacity>
+      </View>
+
+      {/* PLATFORM SETTINGS — Service Fee Controls */}
+      <View style={styles.quickStatsCard}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Ionicons name="settings" size={20} color={Colors.admin} />
+          <Text style={styles.cardTitle}>Platform Settings</Text>
+        </View>
+
+        <View style={styles.statRow}>
+          <Text style={styles.statRowLabel}>Current Service Fee</Text>
+          <Text style={[styles.statRowValue, { color: Colors.admin, fontWeight: 'bold' }]}>
+            {currentFeePercent}%
+          </Text>
+        </View>
+
+        {feeLastUpdated && (
+          <View style={[styles.statRow, styles.borderTop]}>
+            <Text style={styles.statRowLabel}>Last Updated</Text>
+            <Text style={styles.statRowValue}>{feeLastUpdated}</Text>
+          </View>
+        )}
+
+        <View style={[styles.borderTop, { paddingTop: 12, marginTop: 8 }]}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 8 }}>
+            Update Service Fee
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', flex: 1,
+              backgroundColor: Colors.background, borderRadius: 10,
+              borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12,
+            }}>
+              <TextInput
+                style={{ flex: 1, fontSize: 18, fontWeight: '600', color: Colors.text, paddingVertical: 10 }}
+                value={feeInput}
+                onChangeText={setFeeInput}
+                keyboardType="decimal-pad"
+                placeholder="10"
+                placeholderTextColor="#aaa"
+                maxLength={5}
+              />
+              <Text style={{ fontSize: 18, fontWeight: '600', color: Colors.admin }}>%</Text>
+            </View>
+            <TouchableOpacity
+              style={{
+                backgroundColor: Colors.admin, borderRadius: 10,
+                paddingHorizontal: 20, paddingVertical: 12,
+                opacity: feeSaving ? 0.6 : 1,
+              }}
+              onPress={handleSaveFee}
+              disabled={feeSaving}
+            >
+              {feeSaving ? (
+                <ActivityIndicator color={Colors.white} size="small" />
+              ) : (
+                <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 15 }}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.infoBox, { marginTop: 10 }]}>
+            <Ionicons name="information-circle" size={16} color={Colors.secondary} />
+            <Text style={styles.infoText}>
+              Fee is deducted from the owner's payout. Enter a value between 0-50%. Changes apply to all future transactions.
+            </Text>
+          </View>
+        </View>
       </View>
     </ScrollView>
   );

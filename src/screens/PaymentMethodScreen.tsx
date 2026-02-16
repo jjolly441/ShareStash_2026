@@ -6,24 +6,24 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CardField, useStripe } from '@stripe/stripe-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { auth } from '../config/firebase';
 import { AuthContext } from '../contexts/AuthContext';
+import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const FUNCTIONS_BASE_URL = 'https://us-central1-peerrentalapp.cloudfunctions.net';
 
 // ============================================================================
 // TYPES

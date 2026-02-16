@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Image,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import {
   Dimensions,
   Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -20,6 +20,7 @@ import ItemService, { RentalItem } from '../services/ItemService';
 import MessageService from '../services/MessageService';
 import { ReviewService, Review, ReviewStats } from '../services/ReviewService';
 import { AuthContext } from '../contexts/AuthContext';
+import WishlistService from '../services/WishlistService';
 
 const { width } = Dimensions.get('window');
 
@@ -110,6 +111,10 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
       const itemData = await ItemService.getItemById(itemId);
       if (itemData) {
         setItem(itemData);
+        // Check wishlist status
+        if (user?.id) {
+          setIsFavorite(WishlistService.isFavorite(itemId));
+        }
         // Load reviews and stats
         await loadReviews(itemId);
         // Load owner verification status
@@ -224,13 +229,25 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
       itemTitle: item.title,
       itemImage: item.image,
       pricePerDay: item.pricePerDay,
+      pricePerHour: item.pricePerHour || null,
+      pricePerWeek: item.pricePerWeek || null,
+      pricePerMonth: item.pricePerMonth || null,
       ownerId: item.ownerId,
       ownerName: item.ownerName,
     });
   };
 
-  const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
+  const toggleFavorite = async () => {
+    if (!user?.id) {
+      Alert.alert('Sign In Required', 'Please sign in to save items.');
+      return;
+    }
+    try {
+      const newState = await WishlistService.toggleWishlist(user.id, itemId);
+      setIsFavorite(newState);
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+    }
   };
 
   // Issue #20: Share item using native OS share sheet
@@ -369,6 +386,25 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
               <Text style={styles.price}>${item.pricePerDay}</Text>
               <Text style={styles.priceLabel}>per day</Text>
             </View>
+            {(item.pricePerHour || item.pricePerWeek || item.pricePerMonth) && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {item.pricePerHour ? (
+                  <View style={{ backgroundColor: '#F0F7FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ fontSize: 13, color: Colors.secondary, fontWeight: '600' }}>${item.pricePerHour}/hr</Text>
+                  </View>
+                ) : null}
+                {item.pricePerWeek ? (
+                  <View style={{ backgroundColor: '#F0FFF4', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ fontSize: 13, color: Colors.success, fontWeight: '600' }}>${item.pricePerWeek}/wk</Text>
+                  </View>
+                ) : null}
+                {item.pricePerMonth ? (
+                  <View style={{ backgroundColor: '#FFF8F0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ fontSize: 13, color: '#E67E22', fontWeight: '600' }}>${item.pricePerMonth}/mo</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
           </View>
 
           {/* Location */}

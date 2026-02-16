@@ -119,6 +119,24 @@ class DisputeService {
 
       const docRef = await addDoc(collection(db, 'disputes'), newDispute);
 
+      // LAYER 3 FRAUD PROTECTION: Freeze payout if rental is in 48h dispute window
+      try {
+        const rentalRef = doc(db, 'rentals', disputeData.rentalId);
+        const rentalSnap = await getDoc(rentalRef);
+        if (rentalSnap.exists()) {
+          const rentalData = rentalSnap.data();
+          if (rentalData.status === 'completed_pending_payout') {
+            await updateDoc(rentalRef, {
+              payoutFrozen: true,
+            });
+            console.log(`Payout frozen for rental ${disputeData.rentalId} due to dispute ${docRef.id}`);
+          }
+        }
+      } catch (freezeError) {
+        console.error('Error freezing payout:', freezeError);
+        // Don't fail the dispute creation if freeze fails
+      }
+
       // Upload damage photos if any
       if (disputeData.damagePhotos.length > 0) {
         const photosWithUrls = await Promise.all(

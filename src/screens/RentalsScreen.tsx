@@ -39,6 +39,8 @@ const getStatusColor = (status: string): string => {
     case 'pending': return Colors.warning;
     case 'approved': return Colors.blue;
     case 'active': return Colors.success;
+    case 'pending_completion': return '#7C3AED';
+    case 'completed_pending_payout': return Colors.blue;
     case 'completed': return Colors.success;
     case 'declined': return Colors.danger;
     case 'cancelled': return Colors.danger;
@@ -51,6 +53,8 @@ const getStatusLabel = (status: string): string => {
     case 'pending': return 'Pending';
     case 'approved': return 'Approved';
     case 'active': return 'Active';
+    case 'pending_completion': return 'Awaiting Confirmation';
+    case 'completed_pending_payout': return 'Payout Pending (48h)';
     case 'completed': return 'Completed';
     case 'declined': return 'Declined';
     case 'cancelled': return 'Cancelled';
@@ -78,17 +82,17 @@ export default function RentalsScreen() {
     if (!user) return;
 
     try {
-      // Rental requests I've received (as owner) - including approved and active
+      // Rental requests I've received (as owner) - including approved, active, and pending_completion
       const ownerRentals = await RentalService.getOwnerRentals(user.id);
       const activeOwnerRequests = ownerRentals.filter((r: Rental) => 
-        r.status === 'pending' || r.status === 'approved' || r.status === 'active'
+        r.status === 'pending' || r.status === 'approved' || r.status === 'active' || r.status === 'pending_completion' || r.status === 'completed_pending_payout'
       );
       setRentalRequests(activeOwnerRequests);
 
       // My active rentals (as renter)
       const renterRentals = await RentalService.getRenterRentals(user.id);
       const active = renterRentals.filter((r: Rental) => 
-        r.status === 'pending' || r.status === 'approved' || r.status === 'active'
+        r.status === 'pending' || r.status === 'approved' || r.status === 'active' || r.status === 'pending_completion' || r.status === 'completed_pending_payout'
       );
       setMyRentals(active);
 
@@ -202,29 +206,95 @@ export default function RentalsScreen() {
   };
 
   const handleCompleteRental = async (rental: Rental) => {
+    // LAYER 1: Time-based lockout check (also enforced server-side)
+    const endDate = (rental.endDate as any)?.toDate
+      ? (rental.endDate as any).toDate()
+      : new Date(rental.endDate as any);
+    const now = new Date();
+
+    if (now < endDate) {
+      Alert.alert(
+        'Cannot Complete Yet',
+        `This rental cannot be completed until the end date (${endDate.toLocaleDateString()}). Please wait until the rental period ends.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     Alert.alert(
-      'Complete Rental',
-      'Mark this rental as completed? This will trigger the payout to your account.',
+      'Mark Rental Complete',
+      'This will notify the renter to confirm the return. The payout will process 48 hours after both parties confirm.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Complete',
+          text: 'Mark Complete',
           onPress: async () => {
             try {
-              await RentalService.completeRental(rental.id!);
+              await RentalService.initiateCompletion(rental.id!);
               Alert.alert(
-                'Success', 
-                'Rental completed! Payout has been processed to your connected bank account.'
+                'Success',
+                'The renter has been notified to confirm the return. Once confirmed, your payout will process after a 48-hour review window.'
               );
               loadData();
             } catch (error: any) {
-              console.error('Complete rental error:', error);
-              Alert.alert('Error', error.message || 'Failed to complete rental');
+              console.error('Initiate completion error:', error);
+              Alert.alert('Error', error.message || 'Failed to mark rental as complete');
             }
           }
         }
       ]
     );
+  };
+
+  const handleConfirmReturn = async (rental: Rental) => {
+    Alert.alert(
+      'Confirm Return',
+      `Confirm that you have returned "${rental.itemName}" in good condition? The owner\'s payout will process after a 48-hour dispute window.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm Return',
+          onPress: async () => {
+            try {
+              await RentalService.confirmReturn(rental.id!);
+              Alert.alert(
+                'Return Confirmed',
+                'Both parties have confirmed. The payout will process in 48 hours. If you have any issues, report them before the window closes.'
+              );
+              loadData();
+            } catch (error: any) {
+              console.error('Confirm return error:', error);
+              Alert.alert('Error', error.message || 'Failed to confirm return');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleCheckPayout = async (rental: Rental) => {
+    try {
+      const processed = await RentalService.processPayoutIfEligible(rental.id!);
+      if (processed) {
+        Alert.alert('Payout Processed', 'The payout has been sent to the owner\'s bank account.');
+        loadData();
+      } else {
+        // Calculate remaining time
+        const payoutAt = (rental.payoutEligibleAt as any)?.toDate
+          ? (rental.payoutEligibleAt as any).toDate()
+          : rental.payoutEligibleAt ? new Date(rental.payoutEligibleAt as any) : null;
+        
+        if (rental.payoutFrozen) {
+          Alert.alert('Payout Frozen', 'A dispute has been filed. The payout is on hold until the dispute is resolved.');
+        } else if (payoutAt) {
+          const hoursLeft = Math.max(0, Math.ceil((payoutAt.getTime() - Date.now()) / (1000 * 60 * 60)));
+          Alert.alert('Payout Pending', `The payout will be eligible in approximately ${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''}.`);
+        }
+      }
+    } catch (error: any) {
+      console.error('Check payout error:', error);
+      Alert.alert('Error', error.message || 'Failed to check payout status');
+    }
   };
 
   const handleReportIssue = (rental: Rental) => {
@@ -244,6 +314,18 @@ export default function RentalsScreen() {
 
   const handleLeaveReview = (rental: Rental) => {
     (navigation as any).navigate('CreateReview', { rentalId: rental.id });
+  };
+
+  const handleStartPickup = (rental: Rental) => {
+    (navigation as any).navigate('Handoff', { rentalId: rental.id, mode: 'pickup' });
+  };
+
+  const handleStartReturn = (rental: Rental) => {
+    (navigation as any).navigate('Handoff', { rentalId: rental.id, mode: 'return' });
+  };
+
+  const handleMeetingLocation = (rental: Rental) => {
+    (navigation as any).navigate('MeetingLocation', { rentalId: rental.id });
   };
 
   const handleCancelRental = async (rental: Rental) => {
@@ -433,6 +515,37 @@ export default function RentalsScreen() {
                   </Text>
                 </View>
               )}
+
+              {/* Pending Completion - Renter needs to confirm return */}
+              {rental.status === 'pending_completion' && !rental.renterConfirmedReturn && (
+                <View>
+                  <View style={styles.paymentNotice}>
+                    <Ionicons name="information-circle" size={20} color={'#7C3AED'} />
+                    <Text style={[styles.paymentNoticeText, { color: '#7C3AED' }]}>
+                      The owner has marked this rental as complete. Please confirm the return.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.fullButton, { backgroundColor: '#7C3AED' }]}
+                    onPress={() => handleConfirmReturn(rental)}
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color={Colors.white} />
+                    <Text style={styles.actionButtonText}>Confirm Return</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Completed Pending Payout - 48h window info for renter */}
+              {rental.status === 'completed_pending_payout' && (
+                <View style={styles.waitingNotice}>
+                  <Ionicons name="hourglass" size={20} color={Colors.blue} />
+                  <Text style={styles.waitingNoticeText}>
+                    {rental.payoutFrozen 
+                      ? 'Payout is on hold due to a filed dispute.'
+                      : 'Return confirmed. 48-hour dispute window is active. Report any issues before the window closes.'}
+                  </Text>
+                </View>
+              )}
             </>
           )}
 
@@ -477,14 +590,115 @@ export default function RentalsScreen() {
                   onPress={() => handleCompleteRental(rental)}
                 >
                   <Ionicons name="checkmark-done-circle" size={20} color={Colors.white} />
-                  <Text style={styles.actionButtonText}>Complete Rental</Text>
+                  <Text style={styles.actionButtonText}>Mark Rental Complete</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Pending Completion - Waiting for renter to confirm */}
+              {rental.status === 'pending_completion' && (
+                <View style={styles.waitingNotice}>
+                  <Ionicons name="time" size={20} color={'#7C3AED'} />
+                  <Text style={styles.waitingNoticeText}>
+                    Waiting for renter to confirm return...
+                  </Text>
+                </View>
+              )}
+
+              {/* Completed Pending Payout - 48h window */}
+              {rental.status === 'completed_pending_payout' && (
+                <TouchableOpacity
+                  style={[styles.fullButton, { backgroundColor: Colors.blue }]}
+                  onPress={() => handleCheckPayout(rental)}
+                >
+                  <Ionicons name="hourglass" size={20} color={Colors.white} />
+                  <Text style={styles.actionButtonText}>
+                    {rental.payoutFrozen ? 'Payout Frozen — Dispute Filed' : 'Check Payout Status'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </>
           )}
 
-          {/* Report Issue button - for active or completed (both owner and renter) */}
-          {(rental.status === 'active' || rental.status === 'completed') && (
+          {/* MEETING LOCATION - for active and pending_completion rentals */}
+          {(rental.status === 'active' || rental.status === 'pending_completion') && (
+            <TouchableOpacity
+              style={[styles.fullButton, styles.meetingLocationButton]}
+              onPress={() => handleMeetingLocation(rental)}
+            >
+              <Ionicons
+                name={(rental as any).meetingLocation?.status === 'accepted' ? 'checkmark-circle' : 'location'}
+                size={20}
+                color={Colors.white}
+              />
+              <Text style={styles.actionButtonText}>
+                {!(rental as any).meetingLocation
+                  ? 'Set Meeting Location'
+                  : (rental as any).meetingLocation.status === 'accepted'
+                  ? 'View Meeting Location'
+                  : (rental as any).meetingLocation.proposedBy === user.id
+                  ? 'Location Proposed — Awaiting Response'
+                  : 'Review Proposed Location'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Meeting location preview if accepted */}
+          {(rental as any).meetingLocation?.status === 'accepted' && (rental.status === 'active' || rental.status === 'pending_completion') && (
+            <View style={styles.meetingLocationPreview}>
+              <Ionicons name="location" size={16} color={Colors.secondary} />
+              <Text style={styles.meetingLocationText} numberOfLines={1}>
+                {(rental as any).meetingLocation.address}
+              </Text>
+            </View>
+          )}
+
+          {/* HANDOFF BUTTONS - for active rentals (both owner and renter) */}
+          {rental.status === 'active' && (
+            <View style={styles.handoffSection}>
+              {/* Pick-up handoff button */}
+              {!rental.pickupPhotoOwner || !rental.pickupPhotoRenter ? (
+                <TouchableOpacity
+                  style={[styles.fullButton, styles.handoffButton]}
+                  onPress={() => handleStartPickup(rental)}
+                >
+                  <Ionicons name="camera" size={20} color={Colors.white} />
+                  <Text style={styles.actionButtonText}>
+                    {(isOwner && rental.pickupPhotoOwner) || (!isOwner && rental.pickupPhotoRenter)
+                      ? 'Pick-Up Photo Submitted'
+                      : 'Submit Pick-Up Photo'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.handoffComplete}>
+                  <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+                  <Text style={styles.handoffCompleteText}>Pick-up photos complete</Text>
+                </View>
+              )}
+
+              {/* Return handoff button */}
+              {!rental.returnPhotoOwner || !rental.returnPhotoRenter ? (
+                <TouchableOpacity
+                  style={[styles.fullButton, styles.handoffReturnButton]}
+                  onPress={() => handleStartReturn(rental)}
+                >
+                  <Ionicons name="camera-reverse" size={20} color={Colors.white} />
+                  <Text style={styles.actionButtonText}>
+                    {(isOwner && rental.returnPhotoOwner) || (!isOwner && rental.returnPhotoRenter)
+                      ? 'Return Photo Submitted'
+                      : 'Submit Return Photo'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.handoffComplete}>
+                  <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+                  <Text style={styles.handoffCompleteText}>Return photos complete</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Report Issue button - for active, pending_completion, completed_pending_payout, or completed */}
+          {(rental.status === 'active' || rental.status === 'pending_completion' || rental.status === 'completed_pending_payout' || rental.status === 'completed') && (
             <TouchableOpacity 
               style={[styles.fullButton, styles.reportButton]}
               onPress={() => handleReportIssue(rental)}
@@ -841,6 +1055,47 @@ const styles = StyleSheet.create({
   confirmationText: {
     fontSize: 13,
     color: Colors.secondary,
+    fontWeight: '600',
+  },
+  handoffSection: {
+    marginTop: 4,
+  },
+  meetingLocationButton: {
+    backgroundColor: '#0EA5E9',
+  },
+  meetingLocationPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.secondary + '10',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 6,
+    gap: 6,
+  },
+  meetingLocationText: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.secondary,
+    fontWeight: '500',
+  },
+  handoffButton: {
+    backgroundColor: Colors.secondary,
+  },
+  handoffReturnButton: {
+    backgroundColor: '#7C3AED',
+  },
+  handoffComplete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.success + '15',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 8,
+  },
+  handoffCompleteText: {
+    fontSize: 13,
+    color: Colors.success,
     fontWeight: '600',
   },
 });

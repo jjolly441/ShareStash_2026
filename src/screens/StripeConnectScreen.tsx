@@ -18,12 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const FUNCTIONS_BASE_URL = 'https://us-central1-peerrentalapp.cloudfunctions.net';
 
 // ============================================================================
 // TYPES

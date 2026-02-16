@@ -169,9 +169,8 @@ export default function LoginScreen({ navigation }: Props) {
 
             {/* Quick test credentials hint */}
             <View style={styles.testCredentials}>
-              <Text style={styles.testText}>Test credentials:</Text>
-              <Text style={styles.testText}>Email: test@test.com</Text>
-              <Text style={styles.testText}>Password: password</Text>
+              <Text style={styles.testText}>Share Stash - All Rights Reserved</Text>
+              
             </View>
           </View>
         </View>

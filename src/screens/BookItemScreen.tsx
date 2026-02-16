@@ -1,10 +1,9 @@
 // src/screens/BookItemScreen.tsx - FIXED
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   TextInput,
@@ -12,11 +11,13 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { RentalService } from '../services/RentalService'; // FIXED: Named import
 import MessageService from '../services/MessageService';
 import { AuthContext } from '../contexts/AuthContext';
+import SettingsService from '../services/SettingsService';
 
 const Colors = {
   primary: '#F5C542',
@@ -29,9 +30,21 @@ const Colors = {
   border: '#E9ECEF',
 };
 
+type RentalPeriodType = 'hourly' | 'daily' | 'weekly' | 'monthly';
+
 export default function BookItemScreen({ navigation, route }: any) {
-  const { itemId, itemTitle, itemImage, pricePerDay, ownerId, ownerName } = route.params;
+  const { itemId, itemTitle, itemImage, pricePerDay, pricePerHour, pricePerWeek, pricePerMonth, ownerId, ownerName } = route.params;
   const { user } = useContext(AuthContext);
+
+  // Determine which period types are available
+  const availablePeriods: { type: RentalPeriodType; label: string; price: number }[] = [];
+  if (pricePerHour) availablePeriods.push({ type: 'hourly', label: 'Hourly', price: pricePerHour });
+  availablePeriods.push({ type: 'daily', label: 'Daily', price: pricePerDay });
+  if (pricePerWeek) availablePeriods.push({ type: 'weekly', label: 'Weekly', price: pricePerWeek });
+  if (pricePerMonth) availablePeriods.push({ type: 'monthly', label: 'Monthly', price: pricePerMonth });
+
+  const [rentalPeriodType, setRentalPeriodType] = useState<RentalPeriodType>('daily');
+  const [rentalQuantity, setRentalQuantity] = useState(2);
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -47,21 +60,46 @@ export default function BookItemScreen({ navigation, route }: any) {
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [feePercent, setFeePercent] = useState(0.10);
+
+  useEffect(() => {
+    SettingsService.getServiceFeeDecimal().then(fee => setFeePercent(fee)).catch(() => {});
+  }, []);
 
   const calculateRentalDetails = () => {
-    // Calculate days
-    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
-    const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
-    
-    // Calculate prices
-    const totalPrice = pricePerDay * totalDays;
-    const serviceFee = totalPrice * 0.1; // 10% service fee
+    let unitPrice = pricePerDay;
+    let units = 1;
+    let unitLabel = 'day';
+
+    const currentPeriod = availablePeriods.find(p => p.type === rentalPeriodType);
+
+    if (rentalPeriodType === 'hourly' && pricePerHour) {
+      unitPrice = pricePerHour;
+      units = rentalQuantity;
+      unitLabel = units === 1 ? 'hour' : 'hours';
+    } else if (rentalPeriodType === 'daily') {
+      unitPrice = pricePerDay;
+      const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+      units = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+      unitLabel = units === 1 ? 'day' : 'days';
+    } else if (rentalPeriodType === 'weekly' && pricePerWeek) {
+      unitPrice = pricePerWeek;
+      units = rentalQuantity;
+      unitLabel = units === 1 ? 'week' : 'weeks';
+    } else if (rentalPeriodType === 'monthly' && pricePerMonth) {
+      unitPrice = pricePerMonth;
+      units = rentalQuantity;
+      unitLabel = units === 1 ? 'month' : 'months';
+    }
+
+    const totalPrice = unitPrice * units;
+    const serviceFee = totalPrice * feePercent;
     const finalTotal = totalPrice + serviceFee;
 
-    return { totalDays, totalPrice, serviceFee, finalTotal };
+    return { units, unitPrice, unitLabel, totalPrice, serviceFee, finalTotal, totalDays: units };
   };
 
-  const { totalDays, totalPrice, serviceFee, finalTotal } = calculateRentalDetails();
+  const { units, unitPrice, unitLabel, totalPrice, serviceFee, finalTotal, totalDays } = calculateRentalDetails();
 
   const handleStartDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
@@ -109,8 +147,8 @@ export default function BookItemScreen({ navigation, route }: any) {
       return;
     }
 
-    if (totalDays < 1) {
-      Alert.alert('Invalid Rental Period', 'Rental must be at least 1 day');
+    if (units < 1) {
+      Alert.alert('Invalid Rental Period', 'Rental must be at least 1 unit');
       return;
     }
 
@@ -119,9 +157,13 @@ export default function BookItemScreen({ navigation, route }: any) {
       return;
     }
 
+    const periodDesc = rentalPeriodType === 'daily'
+      ? `Dates: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`
+      : `Duration: ${units} ${unitLabel} starting ${startDate.toLocaleDateString()}`;
+
     Alert.alert(
       'Confirm Rental Request',
-      `You are requesting to rent "${itemTitle}" from ${ownerName}.\n\nDates: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\nTotal: $${finalTotal.toFixed(2)}\n\nNote: Payment will be processed after the owner approves your request.`,
+      `You are requesting to rent "${itemTitle}" from ${ownerName}.\n\n${periodDesc}\nTotal: $${finalTotal.toFixed(2)}\n\nNote: Payment will be processed after the owner approves your request.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Confirm', onPress: submitRentalRequest },
@@ -136,7 +178,7 @@ export default function BookItemScreen({ navigation, route }: any) {
       // Create rental with updated interface
       const rentalId = await RentalService.createRental({
         itemId,
-        itemName: itemTitle, // Changed from itemTitle
+        itemName: itemTitle,
         itemImage,
         ownerId,
         ownerName,
@@ -145,8 +187,10 @@ export default function BookItemScreen({ navigation, route }: any) {
         startDate: startDate,
         endDate: endDate,
         totalPrice: finalTotal,
+        rentalPeriodType,
+        rentalQuantity: units,
         status: 'pending',
-        message: message, // Changed from requestMessage
+        message: message,
       });
 
       // Create conversation with owner
@@ -202,9 +246,86 @@ export default function BookItemScreen({ navigation, route }: any) {
           </View>
         </View>
 
+        {/* Rental Period Type Selector */}
+        {availablePeriods.length > 1 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Rental Type</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {availablePeriods.map((period) => (
+                <TouchableOpacity
+                  key={period.type}
+                  onPress={() => {
+                    setRentalPeriodType(period.type);
+                    if (period.type !== 'daily') setRentalQuantity(1);
+                    else setRentalQuantity(2);
+                  }}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    borderWidth: 2,
+                    borderColor: rentalPeriodType === period.type ? Colors.primary : Colors.border,
+                    backgroundColor: rentalPeriodType === period.type ? Colors.primary + '15' : Colors.white,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: rentalPeriodType === period.type ? 'bold' : '500',
+                    color: rentalPeriodType === period.type ? Colors.text : '#666',
+                  }}>
+                    {period.label}
+                  </Text>
+                  <Text style={{
+                    fontSize: 12,
+                    color: rentalPeriodType === period.type ? Colors.secondary : '#999',
+                    marginTop: 2,
+                  }}>
+                    ${period.price}/{period.type === 'hourly' ? 'hr' : period.type === 'daily' ? 'day' : period.type === 'weekly' ? 'wk' : 'mo'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Quantity selector for non-daily periods */}
+        {rentalPeriodType !== 'daily' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              How many {rentalPeriodType === 'hourly' ? 'hours' : rentalPeriodType === 'weekly' ? 'weeks' : 'months'}?
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
+              <TouchableOpacity
+                onPress={() => setRentalQuantity(Math.max(1, rentalQuantity - 1))}
+                style={{
+                  width: 44, height: 44, borderRadius: 22,
+                  backgroundColor: Colors.border, justifyContent: 'center', alignItems: 'center',
+                }}
+              >
+                <Ionicons name="remove" size={24} color={Colors.text} />
+              </TouchableOpacity>
+              <Text style={{ fontSize: 28, fontWeight: 'bold', color: Colors.text, minWidth: 40, textAlign: 'center' }}>
+                {rentalQuantity}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setRentalQuantity(rentalQuantity + 1)}
+                style={{
+                  width: 44, height: 44, borderRadius: 22,
+                  backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center',
+                }}
+              >
+                <Ionicons name="add" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Date Selection */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Rental Period</Text>
+          <Text style={styles.sectionTitle}>
+            {rentalPeriodType === 'daily' ? 'Rental Dates' : 'Start Date'}
+          </Text>
 
           {/* Start Date */}
           <View style={styles.dateContainer}>
@@ -229,34 +350,38 @@ export default function BookItemScreen({ navigation, route }: any) {
             />
           )}
 
-          {/* End Date */}
-          <View style={styles.dateContainer}>
-            <Text style={styles.dateLabel}>End Date</Text>
-            <TouchableOpacity
-              style={styles.dateButton}
-              onPress={() => setShowEndPicker(true)}
-            >
-              <Ionicons name="calendar-outline" size={20} color={Colors.secondary} />
-              <Text style={styles.dateText}>{endDate.toLocaleDateString()}</Text>
-              <Ionicons name="chevron-down" size={20} color={Colors.text} />
-            </TouchableOpacity>
-          </View>
+          {/* End Date — only for daily */}
+          {rentalPeriodType === 'daily' && (
+            <>
+              <View style={styles.dateContainer}>
+                <Text style={styles.dateLabel}>End Date</Text>
+                <TouchableOpacity
+                  style={styles.dateButton}
+                  onPress={() => setShowEndPicker(true)}
+                >
+                  <Ionicons name="calendar-outline" size={20} color={Colors.secondary} />
+                  <Text style={styles.dateText}>{endDate.toLocaleDateString()}</Text>
+                  <Ionicons name="chevron-down" size={20} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
 
-          {showEndPicker && (
-            <DateTimePicker
-              value={endDate}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={handleEndDateChange}
-              minimumDate={new Date(startDate.getTime() + 86400000)}
-            />
+              {showEndPicker && (
+                <DateTimePicker
+                  value={endDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={handleEndDateChange}
+                  minimumDate={new Date(startDate.getTime() + 86400000)}
+                />
+              )}
+            </>
           )}
 
           {/* Rental Duration */}
           <View style={styles.durationBadge}>
             <Ionicons name="time-outline" size={20} color={Colors.primary} />
             <Text style={styles.durationText}>
-              {totalDays} {totalDays === 1 ? 'day' : 'days'}
+              {units} {unitLabel}
             </Text>
           </View>
         </View>
@@ -282,13 +407,13 @@ export default function BookItemScreen({ navigation, route }: any) {
 
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>
-              ${pricePerDay} x {totalDays} {totalDays === 1 ? 'day' : 'days'}
+              ${unitPrice.toFixed(2)} x {units} {unitLabel}
             </Text>
             <Text style={styles.priceValue}>${totalPrice.toFixed(2)}</Text>
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Service Fee (10%)</Text>
+            <Text style={styles.priceLabel}>Service Fee ({Math.round(feePercent * 100)}%)</Text>
             <Text style={styles.priceValue}>${serviceFee.toFixed(2)}</Text>
           </View>
 
