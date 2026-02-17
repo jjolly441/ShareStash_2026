@@ -16,6 +16,7 @@ import {
   RefreshControl,
   AppState,
   AppStateStatus,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +30,8 @@ import { AuthContext } from '../contexts/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import SettingsService from '../services/SettingsService';
+import PromoCodeService, { PromoCode } from '../services/PromoCodeService';
+import { useTranslation } from '../i18n/useTranslation';
 import { FUNCTIONS_BASE_URL } from '../config/constants';
 
 // ============================================================================
@@ -210,6 +213,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   
   // FIXED: Also get refreshUser from context
   const { user, refreshUser } = useContext(AuthContext);
+  const { t } = useTranslation();
 
   const [rental, setRental] = useState<Rental | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -222,6 +226,13 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   const [isVerified, setIsVerified] = useState<boolean | null>(null);
   const [checkingVerification, setCheckingVerification] = useState(true);
   const [feePercent, setFeePercent] = useState(0.10); // default 10%, loaded from settings
+
+  // Promo code state
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoError, setPromoError] = useState('');
+  const [promoLoading, setPromoLoading] = useState(false);
   
   // FIXED: Use ref to prevent multiple simultaneous checks
   const isCheckingRef = useRef(false);
@@ -438,7 +449,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
 
     Alert.alert(
       'Confirm Payment',
-      `You will be charged $${rental.totalPrice.toFixed(2)} for this rental.`,
+      `You will be charged $${total.toFixed(2)} for this rental.${appliedPromo ? `\nPromo code ${appliedPromo.code} applied: -$${promoAmount.toFixed(2)}` : ''}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Pay Now', onPress: processPayment },
@@ -478,8 +489,8 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
         return;
       }
 
-      // Convert amount to cents
-      const amountInCents = Math.round(rental.totalPrice * 100);
+      // Convert amount to cents (use discounted total if promo applied)
+      const amountInCents = Math.round(total * 100);
 
       // Create payment intent via Cloud Function
       const result = await callFunction<{
@@ -517,6 +528,11 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
       // Payment was successful - update rental status
       if (result.status === 'succeeded' || result.status === 'requires_capture') {
         await RentalService.startRental(rental.id || rentalId, result.paymentIntentId);
+
+        // Record promo code usage if one was applied
+        if (appliedPromo?.id && user) {
+          await PromoCodeService.recordUsage(appliedPromo.id, user.id, rental.id || rentalId);
+        }
 
         // Build success message with confirmation number if available
         const confirmMsg = rental.confirmationNumber
@@ -636,18 +652,61 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
     );
   };
 
-  // Calculate fees
-  const calculateFees = () => {
-    if (!rental) return { subtotal: 0, platformFee: 0, total: 0 };
+  // ==========================================================================
+  // PROMO CODE HANDLERS
+  // ==========================================================================
 
-    const total = rental.totalPrice;
-    const platformFee = total * feePercent;
-    const subtotal = total - platformFee;
+  const handleApplyPromo = async () => {
+    if (!promoInput.trim()) return;
+    if (!user || !rental) return;
 
-    return { subtotal, platformFee, total };
+    setPromoLoading(true);
+    setPromoError('');
+
+    try {
+      const result = await PromoCodeService.validatePromoCode(
+        promoInput.trim(),
+        user.id,
+        rental.totalPrice
+      );
+
+      if (result.valid && result.discountAmount && result.promoCode) {
+        setAppliedPromo(result.promoCode);
+        setPromoDiscount(result.discountAmount);
+        setPromoError('');
+      } else {
+        setPromoError(result.error || 'Invalid promo code');
+        setAppliedPromo(null);
+        setPromoDiscount(0);
+      }
+    } catch (error) {
+      setPromoError('Failed to validate promo code');
+    } finally {
+      setPromoLoading(false);
+    }
   };
 
-  const { subtotal, platformFee, total } = calculateFees();
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoDiscount(0);
+    setPromoInput('');
+    setPromoError('');
+  };
+
+  // Calculate fees
+  const calculateFees = () => {
+    if (!rental) return { subtotal: 0, platformFee: 0, promoAmount: 0, total: 0 };
+
+    const baseTotal = rental.totalPrice;
+    const platformFee = baseTotal * feePercent;
+    const subtotal = baseTotal - platformFee;
+    const promoAmount = promoDiscount;
+    const total = Math.max(0, baseTotal - promoAmount);
+
+    return { subtotal, platformFee, promoAmount, total };
+  };
+
+  const { subtotal, platformFee, promoAmount, total } = calculateFees();
 
   // Check if identity verification is needed
   const needsIdentityVerification = rental 
@@ -745,7 +804,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
         {/* Payment Method Selection */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Payment Method</Text>
+            <Text style={styles.sectionTitle}>{t('checkout.paymentMethod')}</Text>
             <TouchableOpacity onPress={handleAddPaymentMethod} disabled={processing}>
               <Text style={[styles.addMethodButton, processing && styles.addMethodButtonDisabled]}>
                 + Add Card
@@ -772,24 +831,119 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
           )}
         </View>
 
+        {/* Promo Code */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t('checkout.promoCode')}</Text>
+
+          {appliedPromo ? (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#F0FFF4',
+              borderRadius: 10,
+              padding: 12,
+              borderWidth: 1,
+              borderColor: '#C6F6D5',
+            }}>
+              <Ionicons name="pricetag" size={20} color={Colors.success} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: Colors.success }}>
+                  {appliedPromo.code}
+                </Text>
+                <Text style={{ fontSize: 13, color: '#48BB78', marginTop: 2 }}>
+                  {appliedPromo.discountType === 'percent'
+                    ? `${appliedPromo.discountValue}% off`
+                    : `$${appliedPromo.discountValue.toFixed(2)} off`}
+                  {' '}— saving ${promoDiscount.toFixed(2)}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={handleRemovePromo} disabled={processing}>
+                <Ionicons name="close-circle" size={24} color="#999" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor: promoError ? '#FC8181' : Colors.border,
+                    borderRadius: 10,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    fontSize: 15,
+                    backgroundColor: Colors.white,
+                    textTransform: 'uppercase',
+                    color: Colors.text,
+                  }}
+                  value={promoInput}
+                  onChangeText={(text) => {
+                    setPromoInput(text.toUpperCase());
+                    setPromoError('');
+                  }}
+                  placeholder={t('checkout.enterPromoCode')}
+                  placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  editable={!processing}
+                />
+                <TouchableOpacity
+                  onPress={handleApplyPromo}
+                  disabled={!promoInput.trim() || promoLoading || processing}
+                  style={{
+                    backgroundColor: promoInput.trim() ? Colors.secondary : Colors.border,
+                    borderRadius: 10,
+                    paddingHorizontal: 18,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}
+                >
+                  {promoLoading ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <Text style={{ color: Colors.white, fontWeight: '600', fontSize: 15 }}>{t('checkout.apply')}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {promoError ? (
+                <Text style={{ color: '#E53E3E', fontSize: 13, marginTop: 6, marginLeft: 4 }}>
+                  {promoError}
+                </Text>
+              ) : null}
+            </>
+          )}
+        </View>
+
         {/* Price Breakdown */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment Details</Text>
+          <Text style={styles.sectionTitle}>{t('checkout.paymentDetails')}</Text>
 
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Rental Amount</Text>
+            <Text style={styles.priceLabel}>{t('checkout.rentalAmount')}</Text>
             <Text style={styles.priceValue}>${subtotal.toFixed(2)}</Text>
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Service Fee ({Math.round(feePercent * 100)}%)</Text>
+            <Text style={styles.priceLabel}>{t('checkout.serviceFee', { percent: Math.round(feePercent * 100) })}</Text>
             <Text style={styles.priceValue}>${platformFee.toFixed(2)}</Text>
           </View>
+
+          {promoAmount > 0 && appliedPromo && (
+            <View style={styles.priceRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="pricetag" size={14} color={Colors.success} />
+                <Text style={[styles.priceLabel, { color: Colors.success, marginLeft: 4 }]}>
+                  Promo ({appliedPromo.code})
+                </Text>
+              </View>
+              <Text style={[styles.priceValue, { color: Colors.success }]}>-${promoAmount.toFixed(2)}</Text>
+            </View>
+          )}
 
           <View style={styles.divider} />
 
           <View style={styles.priceRow}>
-            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalLabel}>{t('checkout.total')}</Text>
             <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
           </View>
 
@@ -860,7 +1014,7 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
           ) : rental?.paymentStatus === 'paid' || rental?.status === 'active' ? (
             <Text style={styles.payButtonText}>Already Paid</Text>
           ) : (
-            <Text style={styles.payButtonText}>Pay Now</Text>
+            <Text style={styles.payButtonText}>{t('checkout.payNow')}</Text>
           )}
         </TouchableOpacity>
       </View>

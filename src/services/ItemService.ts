@@ -11,7 +11,8 @@ import {
   query, 
   where,
   orderBy,
-  Timestamp 
+  Timestamp,
+  increment,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
@@ -25,6 +26,8 @@ export interface RentalItem {
   pricePerHour?: number;
   pricePerWeek?: number;
   pricePerMonth?: number;
+  weeklyDiscountPercent?: number;
+  monthlyDiscountPercent?: number;
   image: string;
   ownerId: string;
   ownerName: string;
@@ -41,6 +44,7 @@ export interface RentalItem {
       longitude: number;
     } | null;
   };
+  viewCount?: number;
 }
 
 class ItemService {
@@ -398,6 +402,78 @@ class ItemService {
       return [];
     }
   }
-}
 
+  // =========================================================================
+  // VIEW TRACKING
+  // =========================================================================
+
+  /**
+   * Increment the view count on an item document (fire-and-forget).
+   * Skips if the viewer is the owner.
+   */
+  async recordItemView(itemId: string, viewerId?: string, ownerId?: string): Promise<void> {
+    try {
+      // Don't count owner viewing their own item
+      if (viewerId && ownerId && viewerId === ownerId) return;
+
+      const itemRef = doc(db, 'items', itemId);
+      await updateDoc(itemRef, {
+        viewCount: increment(1),
+      });
+
+      // Also log to analytics collection for detailed tracking
+      const analyticsRef = collection(db, 'itemViews');
+      await addDoc(analyticsRef, {
+        itemId,
+        viewerId: viewerId || 'anonymous',
+        viewedAt: Timestamp.now(),
+      });
+    } catch (error) {
+      // Silently fail — view tracking should never block the UI
+      console.warn('View tracking error (non-critical):', error);
+    }
+  }
+
+  /**
+   * Get the top N most viewed items
+   */
+  async getMostViewedItems(limit: number = 5): Promise<RentalItem[]> {
+    try {
+      const itemsSnap = await getDocs(collection(db, 'items'));
+      const items: RentalItem[] = itemsSnap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      } as RentalItem));
+
+      return items
+        .filter(i => (i.viewCount || 0) > 0)
+        .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+        .slice(0, limit);
+    } catch (error) {
+      console.error('Error fetching most viewed items:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the least viewed items (items with views, sorted ascending)
+   */
+  async getLeastViewedItems(limit: number = 5): Promise<RentalItem[]> {
+    try {
+      const itemsSnap = await getDocs(collection(db, 'items'));
+      const items: RentalItem[] = itemsSnap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      } as RentalItem));
+
+      return items
+        .filter(i => i.isAvailable)
+        .sort((a, b) => (a.viewCount || 0) - (b.viewCount || 0))
+        .slice(0, limit);
+    } catch (error) {
+      console.error('Error fetching least viewed items:', error);
+      return [];
+    }
+  }
+}
 export default ItemService.getInstance();

@@ -4,6 +4,7 @@ import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import ReferralService from '../services/ReferralService';
 
 // ============================================================================
 // USER INTERFACE - KYC fields are OPTIONAL for backward compatibility
@@ -31,6 +32,10 @@ export interface User {
   // Ratings (from reviews system)
   averageRating?: number;
   totalReviews?: number;
+
+  // Referral
+  referralCode?: string;       // This user's unique referral code
+  referredBy?: string;         // The referral code they used at signup
 }
 
 // ============================================================================
@@ -41,7 +46,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, firstName: string, lastName: string) => Promise<{ success: boolean; error?: string }>;
+  register: (email: string, password: string, firstName: string, lastName: string, referralCode?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   setUser: (user: User | null) => void;
   /** Refresh user data from Firestore (call after verification updates) */
@@ -184,14 +189,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     email: string,
     password: string,
     firstName: string,
-    lastName: string
+    lastName: string,
+    referralCode?: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
       // Create auth user
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
       // Create user document in Firestore with KYC defaults
-      const userData = {
+      const userData: any = {
         email,
         firstName,
         lastName,
@@ -205,7 +211,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         verificationAttempts: 0,
       };
 
+      // If a referral code was provided, store it
+      if (referralCode && referralCode.trim()) {
+        userData.referredBy = referralCode.toUpperCase().trim();
+      }
+
       await setDoc(doc(db, 'users', userCredential.user.uid), userData);
+
+      // Process referral (non-blocking — don't fail registration if this errors)
+      if (referralCode && referralCode.trim()) {
+        try {
+          const validation = await ReferralService.validateReferralCode(
+            referralCode,
+            userCredential.user.uid
+          );
+          if (validation.valid && validation.referrerProfile) {
+            await ReferralService.processReferral(
+              validation.referrerProfile.userId,
+              userCredential.user.uid,
+              referralCode.toUpperCase().trim()
+            );
+          }
+        } catch (refError) {
+          console.warn('Referral processing failed (non-critical):', refError);
+        }
+      }
 
       setUser(mapFirestoreToUser(
         userCredential.user.uid,

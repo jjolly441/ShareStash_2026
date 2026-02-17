@@ -13,7 +13,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { AuthProvider, AuthContext } from './src/contexts/AuthContext';
 import NotificationService from './src/services/NotificationService';
+import { initializeLanguage, t as translate } from './src/i18n';
 import * as Notifications from 'expo-notifications';
+
+// Initialize language preference (loads from AsyncStorage)
+initializeLanguage();
 
 // Configure foreground notification behavior - show banner even when app is open
 Notifications.setNotificationHandler({
@@ -135,16 +139,16 @@ function MainTabs() {
         tabBarStyle: styles.tabBar,
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Rentals" component={RentalsScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: translate('tabs.home') }} />
+      <Tab.Screen name="Rentals" component={RentalsScreen} options={{ tabBarLabel: translate('tabs.rentals') }} />
       <Tab.Screen 
         name="AddItem" 
-        options={{ tabBarLabel: 'Add' }}
+        options={{ tabBarLabel: translate('tabs.addItem') }}
       >
         {(props: any) => <AddItemScreen {...props} />}
       </Tab.Screen>
-      <Tab.Screen name="Messages" component={MessagesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Messages" component={MessagesScreen} options={{ tabBarLabel: translate('tabs.messages') }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: translate('tabs.profile') }} />
     </Tab.Navigator>
   );
 }

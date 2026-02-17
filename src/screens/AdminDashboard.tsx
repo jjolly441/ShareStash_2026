@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  SafeAreaView,
   FlatList,
   TextInput,
   Image,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { 
   collection, 
@@ -33,6 +33,8 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { runAllMigrations } from '../scripts/migrateRentals'; // NEW IMPORT
 import NotificationService from '../services/NotificationService'; // Issue #13: Blast messages
 import SettingsService from '../services/SettingsService';
+import PromoCodeService, { PromoCode } from '../services/PromoCodeService';
+import ItemService from '../services/ItemService';
 
 
 const Colors = {
@@ -97,7 +99,7 @@ interface DashboardStats {
   openDisputes: number;
 }
 
-type TabType = 'overview' | 'users' | 'items' | 'rentals' | 'disputes';
+type TabType = 'overview' | 'users' | 'items' | 'rentals' | 'disputes' | 'promos';
 
 type AdminDashboardProps = {
   navigation: StackNavigationProp<any>;
@@ -124,6 +126,23 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   const [items, setItems] = useState<Item[]>([]);
   const [rentals, setRentals] = useState<Rental[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
+
+  // Promo code state
+  const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+  const [showCreatePromo, setShowCreatePromo] = useState(false);
+  const [mostViewed, setMostViewed] = useState<any[]>([]);
+  const [leastViewed, setLeastViewed] = useState<any[]>([]);
+  const [newPromo, setNewPromo] = useState({
+    code: '',
+    discountType: 'percent' as 'percent' | 'flat',
+    discountValue: '',
+    maxUses: '0',
+    maxUsesPerUser: '1',
+    minRentalAmount: '0',
+    maxDiscountAmount: '0',
+    expiresAt: '',
+    description: '',
+  });
 
   // Service fee controls
   const [currentFeePercent, setCurrentFeePercent] = useState<number>(10);
@@ -170,6 +189,16 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
         ...doc.data(),
       } as Dispute));
       setDisputes(disputesData);
+
+      // Fetch promo codes
+      const promoData = await PromoCodeService.getAllPromoCodes();
+      setPromoCodes(promoData);
+
+      // Fetch view analytics
+      const topItems = await ItemService.getMostViewedItems(5);
+      setMostViewed(topItems);
+      const bottomItems = await ItemService.getLeastViewedItems(5);
+      setLeastViewed(bottomItems);
 
       // Calculate stats
       const now = new Date();
@@ -609,6 +638,47 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
             {items.filter(i => i.isAvailable).length}
           </Text>
         </View>
+      </View>
+
+      {/* Item View Analytics */}
+      <View style={styles.quickStatsCard}>
+        <Text style={styles.cardTitle}>Most Viewed Items</Text>
+        {mostViewed.length === 0 ? (
+          <Text style={{ color: '#999', fontSize: 13, padding: 8 }}>No view data yet. Views are tracked when users open item details.</Text>
+        ) : (
+          mostViewed.map((item, index) => (
+            <View key={item.id} style={[styles.statRow, index > 0 && styles.borderTop]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: 'bold', color: Colors.admin, marginRight: 8, width: 20 }}>#{index + 1}</Text>
+                <Text style={{ fontSize: 14, color: Colors.text, flex: 1 }} numberOfLines={1}>{item.title}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="eye" size={14} color={Colors.secondary} />
+                <Text style={{ fontSize: 14, fontWeight: 'bold', color: Colors.secondary, marginLeft: 4 }}>{item.viewCount || 0}</Text>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.quickStatsCard}>
+        <Text style={styles.cardTitle}>Least Viewed Items</Text>
+        {leastViewed.length === 0 ? (
+          <Text style={{ color: '#999', fontSize: 13, padding: 8 }}>No items to show.</Text>
+        ) : (
+          leastViewed.map((item, index) => (
+            <View key={item.id} style={[styles.statRow, index > 0 && styles.borderTop]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: 'bold', color: Colors.warning, marginRight: 8, width: 20 }}>#{index + 1}</Text>
+                <Text style={{ fontSize: 14, color: Colors.text, flex: 1 }} numberOfLines={1}>{item.title}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="eye-off-outline" size={14} color="#999" />
+                <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#999', marginLeft: 4 }}>{item.viewCount || 0}</Text>
+              </View>
+            </View>
+          ))
+        )}
       </View>
 
       {/* NEW SYSTEM TOOLS SECTION */}
@@ -1063,6 +1133,233 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
     );
   };
 
+  // ==========================================================================
+  // PROMO CODES TAB
+  // ==========================================================================
+
+  const handleCreatePromo = async () => {
+    if (!newPromo.code.trim()) {
+      Alert.alert('Error', 'Promo code is required');
+      return;
+    }
+    if (!newPromo.discountValue || isNaN(Number(newPromo.discountValue))) {
+      Alert.alert('Error', 'Valid discount value is required');
+      return;
+    }
+
+    try {
+      await PromoCodeService.createPromoCode({
+        code: newPromo.code,
+        discountType: newPromo.discountType,
+        discountValue: parseFloat(newPromo.discountValue),
+        maxUses: parseInt(newPromo.maxUses) || 0,
+        maxUsesPerUser: parseInt(newPromo.maxUsesPerUser) || 0,
+        minRentalAmount: parseFloat(newPromo.minRentalAmount) || 0,
+        maxDiscountAmount: parseFloat(newPromo.maxDiscountAmount) || 0,
+        expiresAt: newPromo.expiresAt ? Timestamp.fromDate(new Date(newPromo.expiresAt)) : null,
+        isActive: true,
+        createdBy: user?.id || '',
+        description: newPromo.description,
+      });
+
+      Alert.alert('Success', `Promo code "${newPromo.code.toUpperCase()}" created!`);
+      setShowCreatePromo(false);
+      setNewPromo({
+        code: '', discountType: 'percent', discountValue: '', maxUses: '0',
+        maxUsesPerUser: '1', minRentalAmount: '0', maxDiscountAmount: '0',
+        expiresAt: '', description: '',
+      });
+      await fetchDashboardData();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to create promo code');
+    }
+  };
+
+  const handleTogglePromo = async (promo: PromoCode) => {
+    if (!promo.id) return;
+    await PromoCodeService.toggleActive(promo.id, !promo.isActive);
+    await fetchDashboardData();
+  };
+
+  const handleDeletePromo = (promo: PromoCode) => {
+    Alert.alert(
+      'Delete Promo Code',
+      `Delete "${promo.code}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (promo.id) {
+              await PromoCodeService.deletePromoCode(promo.id);
+              await fetchDashboardData();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderPromos = () => (
+    <ScrollView
+      style={styles.scrollView}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      {/* Create Button */}
+      <TouchableOpacity
+        style={[styles.actionButton, { backgroundColor: Colors.admin, marginHorizontal: 16, marginTop: 16, marginBottom: 8, borderRadius: 10, paddingVertical: 14 }]}
+        onPress={() => setShowCreatePromo(!showCreatePromo)}
+      >
+        <Ionicons name={showCreatePromo ? 'close' : 'add'} size={20} color="#fff" />
+        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15, marginLeft: 8 }}>
+          {showCreatePromo ? 'Cancel' : 'Create Promo Code'}
+        </Text>
+      </TouchableOpacity>
+
+      {/* Create Form */}
+      {showCreatePromo && (
+        <View style={[styles.card, { margin: 16, padding: 16 }]}>
+          <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 12 }}>New Promo Code</Text>
+
+          <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Code *</Text>
+          <TextInput
+            style={[styles.input, { textTransform: 'uppercase' }]}
+            value={newPromo.code}
+            onChangeText={(v) => setNewPromo({ ...newPromo, code: v.toUpperCase() })}
+            placeholder="e.g. WELCOME20"
+            autoCapitalize="characters"
+          />
+
+          <Text style={{ fontSize: 13, color: '#666', marginBottom: 4, marginTop: 10 }}>Discount Type</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+            <TouchableOpacity
+              onPress={() => setNewPromo({ ...newPromo, discountType: 'percent' })}
+              style={{
+                flex: 1, padding: 10, borderRadius: 8, borderWidth: 2, alignItems: 'center',
+                borderColor: newPromo.discountType === 'percent' ? Colors.admin : '#ddd',
+                backgroundColor: newPromo.discountType === 'percent' ? Colors.admin + '15' : '#fff',
+              }}
+            >
+              <Text style={{ fontWeight: newPromo.discountType === 'percent' ? 'bold' : '500' }}>Percentage (%)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setNewPromo({ ...newPromo, discountType: 'flat' })}
+              style={{
+                flex: 1, padding: 10, borderRadius: 8, borderWidth: 2, alignItems: 'center',
+                borderColor: newPromo.discountType === 'flat' ? Colors.admin : '#ddd',
+                backgroundColor: newPromo.discountType === 'flat' ? Colors.admin + '15' : '#fff',
+              }}
+            >
+              <Text style={{ fontWeight: newPromo.discountType === 'flat' ? 'bold' : '500' }}>Flat Amount ($)</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>
+            Discount Value {newPromo.discountType === 'percent' ? '(%)' : '($)'} *
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={newPromo.discountValue}
+            onChangeText={(v) => setNewPromo({ ...newPromo, discountValue: v })}
+            placeholder={newPromo.discountType === 'percent' ? 'e.g. 20' : 'e.g. 5.00'}
+            keyboardType="numeric"
+          />
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Max Total Uses (0=unlimited)</Text>
+              <TextInput style={styles.input} value={newPromo.maxUses} onChangeText={(v) => setNewPromo({ ...newPromo, maxUses: v })} keyboardType="numeric" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Max Per User (0=unlimited)</Text>
+              <TextInput style={styles.input} value={newPromo.maxUsesPerUser} onChangeText={(v) => setNewPromo({ ...newPromo, maxUsesPerUser: v })} keyboardType="numeric" />
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Min Rental Amount ($)</Text>
+              <TextInput style={styles.input} value={newPromo.minRentalAmount} onChangeText={(v) => setNewPromo({ ...newPromo, minRentalAmount: v })} keyboardType="numeric" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Max Discount Cap ($)</Text>
+              <TextInput style={styles.input} value={newPromo.maxDiscountAmount} onChangeText={(v) => setNewPromo({ ...newPromo, maxDiscountAmount: v })} keyboardType="numeric" />
+            </View>
+          </View>
+
+          <Text style={{ fontSize: 13, color: '#666', marginBottom: 4, marginTop: 10 }}>Description (internal)</Text>
+          <TextInput
+            style={styles.input}
+            value={newPromo.description}
+            onChangeText={(v) => setNewPromo({ ...newPromo, description: v })}
+            placeholder="e.g. Launch promo for early users"
+          />
+
+          <TouchableOpacity
+            style={{ backgroundColor: Colors.success, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 16 }}
+            onPress={handleCreatePromo}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Create Promo Code</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Promo Code List */}
+      <View style={{ padding: 16 }}>
+        <Text style={{ fontSize: 14, color: '#666', marginBottom: 8 }}>
+          {promoCodes.length} promo code{promoCodes.length !== 1 ? 's' : ''}
+        </Text>
+
+        {promoCodes.length === 0 ? (
+          <View style={[styles.card, { padding: 24, alignItems: 'center' }]}>
+            <Ionicons name="pricetag-outline" size={40} color="#ccc" />
+            <Text style={{ color: '#999', marginTop: 8 }}>No promo codes yet</Text>
+          </View>
+        ) : (
+          promoCodes
+            .sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
+            .map((promo) => (
+            <View key={promo.id} style={[styles.card, { padding: 14, marginBottom: 10, opacity: promo.isActive ? 1 : 0.6 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ fontSize: 17, fontWeight: 'bold', color: Colors.text }}>{promo.code}</Text>
+                    <View style={{
+                      backgroundColor: promo.isActive ? '#C6F6D5' : '#FED7D7',
+                      borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2,
+                    }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: promo.isActive ? Colors.success : Colors.danger }}>
+                        {promo.isActive ? 'Active' : 'Inactive'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 14, color: Colors.secondary, fontWeight: '600', marginTop: 4 }}>
+                    {promo.discountType === 'percent' ? `${promo.discountValue}% off` : `$${promo.discountValue.toFixed(2)} off`}
+                    {promo.maxDiscountAmount > 0 ? ` (max $${promo.maxDiscountAmount})` : ''}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                    Used {promo.currentUses}/{promo.maxUses || '∞'}
+                    {promo.minRentalAmount > 0 ? ` • Min $${promo.minRentalAmount}` : ''}
+                    {promo.description ? ` • ${promo.description}` : ''}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity onPress={() => handleTogglePromo(promo)}>
+                    <Ionicons name={promo.isActive ? 'pause-circle' : 'play-circle'} size={28} color={promo.isActive ? Colors.warning : Colors.success} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDeletePromo(promo)}>
+                    <Ionicons name="trash-outline" size={24} color={Colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+    </ScrollView>
+  );
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -1084,6 +1381,8 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
         return renderRentals();
       case 'disputes':
         return renderDisputes();
+      case 'promos':
+        return renderPromos();
       default:
         return renderOverview();
     }
@@ -1205,6 +1504,23 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
               <Text style={styles.badgeNotificationText}>{stats.openDisputes}</Text>
             </View>
           )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => {
+            setActiveTab('promos');
+            setSearchQuery('');
+          }}
+        >
+          <Ionicons 
+            name={activeTab === 'promos' ? 'pricetag' : 'pricetag-outline'} 
+            size={24} 
+            color={activeTab === 'promos' ? Colors.admin : Colors.text} 
+          />
+          <Text style={[styles.navText, activeTab === 'promos' && styles.navTextActive]}>
+            Promos
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

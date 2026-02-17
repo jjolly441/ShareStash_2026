@@ -6,12 +6,12 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { AuthContext } from '../../contexts/AuthContext';
 import { RootStackParamList } from '../../types/navigation';
@@ -38,6 +38,7 @@ export default function RegisterScreen({ navigation }: Props) {
     email: '',
     password: '',
     confirmPassword: '',
+    referralCode: '',
   });
   const [loading, setLoading] = useState(false);
   const { login, register } = useContext(AuthContext);
@@ -91,7 +92,8 @@ export default function RegisterScreen({ navigation }: Props) {
         formData.email.trim().toLowerCase(),
         formData.password,
         formData.firstName.trim(),
-        formData.lastName.trim()
+        formData.lastName.trim(),
+        formData.referralCode.trim() || undefined
       );
 
       if (result.success) {
@@ -193,6 +195,23 @@ export default function RegisterScreen({ navigation }: Props) {
                   autoCapitalize="none"
                   editable={!loading}
                 />
+              </View>
+
+              {/* Referral Code (Optional) */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Referral Code (Optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.referralCode}
+                  onChangeText={(value) => updateField('referralCode', value.toUpperCase())}
+                  placeholder="e.g. SHARE7X9K"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!loading}
+                />
+                <Text style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+                  Have a friend on ShareStash? Enter their code and you both get $5 off!
+                </Text>
               </View>
 
               <TouchableOpacity 

@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,9 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types/navigation';
 import NotificationService from '../services/NotificationService';
+import { useTranslation } from '../i18n/useTranslation';
+import { SUPPORTED_LANGUAGES, changeLanguage, getCurrentLanguageInfo } from '../i18n';
+import ReferralService, { ReferralProfile } from '../services/ReferralService';
 import { ReviewService, ReviewStats } from '../services/ReviewService';
 import {
   VerificationService,
@@ -134,6 +138,10 @@ const VerificationBadge = ({
 export default function ProfileScreen() {
   const { user, logout, refreshUser } = useContext(AuthContext);
   const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const { t, locale } = useTranslation();
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false);
+  const [referralProfile, setReferralProfile] = useState<ReferralProfile | null>(null);
+  const [rewardCodes, setRewardCodes] = useState<{ code: string; amount: number; description: string; used: boolean }[]>([]);
 
   // State
   const [unreadCount, setUnreadCount] = useState(0);
@@ -187,6 +195,7 @@ export default function ProfileScreen() {
       loadUnreadCount();
       loadUserRating();
       loadVerificationStatus();
+      loadReferralProfile();
     }, [user])
   );
 
@@ -194,7 +203,41 @@ export default function ProfileScreen() {
     loadUnreadCount();
     loadUserRating();
     loadVerificationStatus();
+    loadReferralProfile();
   }, []);
+
+  const loadReferralProfile = async () => {
+    if (!user?.id) return;
+    try {
+      const profile = await ReferralService.getOrCreateReferralProfile(user.id);
+      setReferralProfile(profile);
+      const codes = await ReferralService.getUserRewardCodes(user.id);
+      setRewardCodes(codes);
+    } catch (error) {
+      console.warn('Failed to load referral profile:', error);
+    }
+  };
+
+  const handleShareReferral = async () => {
+    if (!referralProfile) return;
+    const rewards = ReferralService.getRewardConfig();
+    try {
+      await Share.share({
+        message: `Join me on ShareStash! Use my referral code ${referralProfile.referralCode} when you sign up and we both get $${rewards.refereeReward} off our next rental. Download: https://sharestash.app`,
+      });
+    } catch (error) {
+      console.warn('Share failed:', error);
+    }
+  };
+
+  const handleCopyReferralCode = async () => {
+    if (!referralProfile) return;
+    try {
+      await Share.share({ message: referralProfile.referralCode });
+    } catch {
+      Alert.alert('Your Code', referralProfile.referralCode);
+    }
+  };
 
   // ==========================================================================
   // HANDLERS
@@ -549,6 +592,152 @@ export default function ProfileScreen() {
             )}
           </View>
 
+          {/* Referral Program Card */}
+          {referralProfile && (
+            <View style={{
+              backgroundColor: Colors.white,
+              borderRadius: 16,
+              padding: 20,
+              marginHorizontal: 20,
+              marginTop: 16,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.06,
+              shadowRadius: 8,
+              elevation: 3,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                <Ionicons name="gift-outline" size={24} color={Colors.secondary} />
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: Colors.text, marginLeft: 8 }}>
+                  Invite Friends, Get $5
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 13, color: '#666', marginBottom: 16, lineHeight: 18 }}>
+                Share your code with friends. When they sign up and rent, you both get $5 off!
+              </Text>
+
+              {/* Referral Code Display */}
+              <View style={{
+                backgroundColor: Colors.primary + '20',
+                borderRadius: 12,
+                padding: 14,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12,
+                borderWidth: 2,
+                borderColor: Colors.primary,
+                borderStyle: 'dashed',
+              }}>
+                <Text style={{ fontSize: 22, fontWeight: 'bold', color: Colors.text, letterSpacing: 2 }}>
+                  {referralProfile.referralCode}
+                </Text>
+                <TouchableOpacity
+                  onPress={handleCopyReferralCode}
+                  style={{
+                    backgroundColor: Colors.white,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={20} color={Colors.secondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Stats row */}
+              {referralProfile.totalReferrals > 0 && (
+                <View style={{ flexDirection: 'row', marginBottom: 12, gap: 12 }}>
+                  <View style={{ flex: 1, backgroundColor: '#F0FFF4', borderRadius: 10, padding: 10, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: Colors.success }}>{referralProfile.totalReferrals}</Text>
+                    <Text style={{ fontSize: 11, color: '#666' }}>Friends Invited</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: '#F0F7FF', borderRadius: 10, padding: 10, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: Colors.secondary }}>${referralProfile.totalCreditsEarned.toFixed(0)}</Text>
+                    <Text style={{ fontSize: 11, color: '#666' }}>Credits Earned</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Your Reward Codes */}
+              {rewardCodes.length > 0 && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text, marginBottom: 8 }}>
+                    Your Reward Codes
+                  </Text>
+                  {rewardCodes.map((reward, index) => (
+                    <View
+                      key={index}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: reward.used ? '#F5F5F5' : '#F0FFF4',
+                        borderRadius: 10,
+                        padding: 12,
+                        marginBottom: 6,
+                        borderWidth: 1,
+                        borderColor: reward.used ? '#E0E0E0' : Colors.success + '40',
+                      }}
+                    >
+                      <Ionicons
+                        name={reward.used ? 'checkmark-circle' : 'ticket-outline'}
+                        size={20}
+                        color={reward.used ? '#999' : Colors.success}
+                      />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={{
+                          fontSize: 16,
+                          fontWeight: 'bold',
+                          color: reward.used ? '#999' : Colors.text,
+                          letterSpacing: 1,
+                          textDecorationLine: reward.used ? 'line-through' : 'none',
+                        }}>
+                          {reward.code}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: reward.used ? '#BBB' : '#666', marginTop: 2 }}>
+                          {reward.description} — ${reward.amount.toFixed(2)} off
+                          {reward.used ? ' (Used)' : ''}
+                        </Text>
+                      </View>
+                      {!reward.used && (
+                        <View style={{
+                          backgroundColor: Colors.success + '20',
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                        }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: Colors.success }}>ACTIVE</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                  <Text style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
+                    Enter these codes at checkout in the "Promo Code" field
+                  </Text>
+                </View>
+              )}
+
+              {/* Share Button */}
+              <TouchableOpacity
+                onPress={handleShareReferral}
+                style={{
+                  backgroundColor: Colors.secondary,
+                  borderRadius: 12,
+                  paddingVertical: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="share-social-outline" size={20} color={Colors.white} />
+                <Text style={{ color: Colors.white, fontWeight: '700', fontSize: 16, marginLeft: 8 }}>
+                  Share Your Code
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Admin Dashboard Button */}
           {user?.role === 'admin' && (
             <View style={styles.section}>
@@ -559,7 +748,7 @@ export default function ProfileScreen() {
                 <View style={styles.adminButtonContent}>
                   <Ionicons name="shield" size={24} color={Colors.white} />
                   <View style={styles.adminButtonText}>
-                    <Text style={styles.adminButtonTitle}>Admin Dashboard</Text>
+                    <Text style={styles.adminButtonTitle}>{t('profile.adminDashboard')}</Text>
                     <Text style={styles.adminButtonSubtitle}>
                       Manage users, items & rentals
                     </Text>
@@ -583,7 +772,7 @@ export default function ProfileScreen() {
               onPress={() => navigation.navigate('EditProfile')}
             >
               <Ionicons name="person-outline" size={24} color={Colors.text} />
-              <Text style={styles.menuText}>Edit Profile</Text>
+              <Text style={styles.menuText}>{t('profile.editProfile')}</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
@@ -592,7 +781,7 @@ export default function ProfileScreen() {
               onPress={() => navigation.navigate('MyItems')}
             >
               <Ionicons name="list-outline" size={24} color={Colors.text} />
-              <Text style={styles.menuText}>My Items</Text>
+              <Text style={styles.menuText}>{t('profile.myItems')}</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
@@ -601,7 +790,7 @@ export default function ProfileScreen() {
               onPress={() => navigation.navigate('Wishlist')}
             >
               <Ionicons name="heart-outline" size={24} color="#EF4444" />
-              <Text style={styles.menuText}>Saved Items</Text>
+              <Text style={styles.menuText}>{t('profile.wishlist')}</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
@@ -708,7 +897,7 @@ export default function ProfileScreen() {
                 size={24}
                 color={Colors.text}
               />
-              <Text style={styles.menuText}>Privacy Policy</Text>
+              <Text style={styles.menuText}>{t('profile.privacyPolicy')}</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
 
@@ -721,15 +910,70 @@ export default function ProfileScreen() {
                 size={24}
                 color={Colors.text}
               />
-              <Text style={styles.menuText}>Terms of Service</Text>
+              <Text style={styles.menuText}>{t('profile.termsOfService')}</Text>
               <Ionicons name="chevron-forward" size={20} color={Colors.text} />
             </TouchableOpacity>
+          </View>
+
+          {/* Language Selector */}
+          <View style={styles.menuSection}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => setShowLanguagePicker(!showLanguagePicker)}
+            >
+              <Ionicons name="language-outline" size={24} color={Colors.text} />
+              <Text style={styles.menuText}>{t('profile.language')}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 14, color: '#999', marginRight: 4 }}>
+                  {getCurrentLanguageInfo().flag} {getCurrentLanguageInfo().nativeName}
+                </Text>
+                <Ionicons name={showLanguagePicker ? 'chevron-up' : 'chevron-down'} size={20} color={Colors.text} />
+              </View>
+            </TouchableOpacity>
+
+            {showLanguagePicker && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <TouchableOpacity
+                    key={lang.code}
+                    onPress={async () => {
+                      await changeLanguage(lang.code);
+                      setShowLanguagePicker(false);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      paddingHorizontal: 12,
+                      borderRadius: 10,
+                      marginTop: 4,
+                      backgroundColor: locale === lang.code ? Colors.secondary + '15' : 'transparent',
+                    }}
+                  >
+                    <Text style={{ fontSize: 22, marginRight: 12 }}>{lang.flag}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{
+                        fontSize: 15,
+                        fontWeight: locale === lang.code ? 'bold' : '500',
+                        color: locale === lang.code ? Colors.secondary : Colors.text,
+                      }}>
+                        {lang.nativeName}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#999' }}>{lang.name}</Text>
+                    </View>
+                    {locale === lang.code && (
+                      <Ionicons name="checkmark-circle" size={22} color={Colors.secondary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* Logout Button */}
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={24} color={Colors.danger} />
-            <Text style={styles.logoutText}>Logout</Text>
+            <Text style={styles.logoutText}>{t('profile.logout')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

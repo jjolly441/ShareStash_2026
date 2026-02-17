@@ -18,6 +18,7 @@ import { RentalService } from '../services/RentalService'; // FIXED: Named impor
 import MessageService from '../services/MessageService';
 import { AuthContext } from '../contexts/AuthContext';
 import SettingsService from '../services/SettingsService';
+import { useTranslation } from '../i18n/useTranslation';
 
 const Colors = {
   primary: '#F5C542',
@@ -33,15 +34,16 @@ const Colors = {
 type RentalPeriodType = 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 export default function BookItemScreen({ navigation, route }: any) {
-  const { itemId, itemTitle, itemImage, pricePerDay, pricePerHour, pricePerWeek, pricePerMonth, ownerId, ownerName } = route.params;
+  const { itemId, itemTitle, itemImage, pricePerDay, pricePerHour, pricePerWeek, pricePerMonth, weeklyDiscountPercent, monthlyDiscountPercent, ownerId, ownerName } = route.params;
   const { user } = useContext(AuthContext);
+  const { t } = useTranslation();
 
   // Determine which period types are available
   const availablePeriods: { type: RentalPeriodType; label: string; price: number }[] = [];
-  if (pricePerHour) availablePeriods.push({ type: 'hourly', label: 'Hourly', price: pricePerHour });
-  availablePeriods.push({ type: 'daily', label: 'Daily', price: pricePerDay });
-  if (pricePerWeek) availablePeriods.push({ type: 'weekly', label: 'Weekly', price: pricePerWeek });
-  if (pricePerMonth) availablePeriods.push({ type: 'monthly', label: 'Monthly', price: pricePerMonth });
+  if (pricePerHour) availablePeriods.push({ type: 'hourly', label: t('booking.hourly'), price: pricePerHour });
+  availablePeriods.push({ type: 'daily', label: t('booking.daily'), price: pricePerDay });
+  if (pricePerWeek) availablePeriods.push({ type: 'weekly', label: t('booking.weekly'), price: pricePerWeek });
+  if (pricePerMonth) availablePeriods.push({ type: 'monthly', label: t('booking.monthly'), price: pricePerMonth });
 
   const [rentalPeriodType, setRentalPeriodType] = useState<RentalPeriodType>('daily');
   const [rentalQuantity, setRentalQuantity] = useState(2);
@@ -70,6 +72,8 @@ export default function BookItemScreen({ navigation, route }: any) {
     let unitPrice = pricePerDay;
     let units = 1;
     let unitLabel = 'day';
+    let discountPercent = 0;
+    let discountLabel = '';
 
     const currentPeriod = availablePeriods.find(p => p.type === rentalPeriodType);
 
@@ -82,6 +86,15 @@ export default function BookItemScreen({ navigation, route }: any) {
       const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
       units = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
       unitLabel = units === 1 ? 'day' : 'days';
+
+      // Apply daily duration discounts
+      if (units >= 28 && monthlyDiscountPercent) {
+        discountPercent = monthlyDiscountPercent;
+        discountLabel = 'Monthly discount';
+      } else if (units >= 7 && weeklyDiscountPercent) {
+        discountPercent = weeklyDiscountPercent;
+        discountLabel = 'Weekly discount';
+      }
     } else if (rentalPeriodType === 'weekly' && pricePerWeek) {
       unitPrice = pricePerWeek;
       units = rentalQuantity;
@@ -92,14 +105,16 @@ export default function BookItemScreen({ navigation, route }: any) {
       unitLabel = units === 1 ? 'month' : 'months';
     }
 
-    const totalPrice = unitPrice * units;
+    const subtotal = unitPrice * units;
+    const discountAmount = subtotal * (discountPercent / 100);
+    const totalPrice = subtotal - discountAmount;
     const serviceFee = totalPrice * feePercent;
     const finalTotal = totalPrice + serviceFee;
 
-    return { units, unitPrice, unitLabel, totalPrice, serviceFee, finalTotal, totalDays: units };
+    return { units, unitPrice, unitLabel, subtotal, discountPercent, discountLabel, discountAmount, totalPrice, serviceFee, finalTotal, totalDays: units };
   };
 
-  const { units, unitPrice, unitLabel, totalPrice, serviceFee, finalTotal, totalDays } = calculateRentalDetails();
+  const { units, unitPrice, unitLabel, subtotal, discountPercent, discountLabel, discountAmount, totalPrice, serviceFee, finalTotal, totalDays } = calculateRentalDetails();
 
   const handleStartDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
@@ -231,7 +246,7 @@ export default function BookItemScreen({ navigation, route }: any) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Book Item</Text>
+        <Text style={styles.headerTitle}>{t('booking.title')}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -324,12 +339,12 @@ export default function BookItemScreen({ navigation, route }: any) {
         {/* Date Selection */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {rentalPeriodType === 'daily' ? 'Rental Dates' : 'Start Date'}
+            {rentalPeriodType === 'daily' ? t('booking.selectDates') : t('booking.startDate')}
           </Text>
 
           {/* Start Date */}
           <View style={styles.dateContainer}>
-            <Text style={styles.dateLabel}>Start Date</Text>
+            <Text style={styles.dateLabel}>{t('booking.startDate')}</Text>
             <TouchableOpacity
               style={styles.dateButton}
               onPress={() => setShowStartPicker(true)}
@@ -354,7 +369,7 @@ export default function BookItemScreen({ navigation, route }: any) {
           {rentalPeriodType === 'daily' && (
             <>
               <View style={styles.dateContainer}>
-                <Text style={styles.dateLabel}>End Date</Text>
+                <Text style={styles.dateLabel}>{t('booking.endDate')}</Text>
                 <TouchableOpacity
                   style={styles.dateButton}
                   onPress={() => setShowEndPicker(true)}
@@ -384,16 +399,35 @@ export default function BookItemScreen({ navigation, route }: any) {
               {units} {unitLabel}
             </Text>
           </View>
+
+          {/* Discount hint — nudge user to extend for a discount */}
+          {rentalPeriodType === 'daily' && discountPercent === 0 && (
+            (weeklyDiscountPercent && units >= 4 && units < 7) ? (
+              <View style={{ backgroundColor: '#FFF8E1', borderRadius: 8, padding: 10, marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="pricetag-outline" size={16} color="#F5A623" />
+                <Text style={{ fontSize: 13, color: '#8B6914', marginLeft: 6, flex: 1 }}>
+                  Add {7 - units} more {7 - units === 1 ? 'day' : 'days'} to save {weeklyDiscountPercent}% with the weekly discount!
+                </Text>
+              </View>
+            ) : (monthlyDiscountPercent && units >= 21 && units < 28) ? (
+              <View style={{ backgroundColor: '#FFF8E1', borderRadius: 8, padding: 10, marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="pricetag-outline" size={16} color="#F5A623" />
+                <Text style={{ fontSize: 13, color: '#8B6914', marginLeft: 6, flex: 1 }}>
+                  Add {28 - units} more {28 - units === 1 ? 'day' : 'days'} to save {monthlyDiscountPercent}% with the monthly discount!
+                </Text>
+              </View>
+            ) : null
+          )}
         </View>
 
         {/* Message to Owner */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Message to Owner</Text>
+          <Text style={styles.sectionTitle}>{t('booking.messageToOwner')}</Text>
           <TextInput
             style={styles.messageInput}
             value={message}
             onChangeText={setMessage}
-            placeholder="Tell the owner why you want to rent this item and any questions you have..."
+            placeholder={t('booking.messagePlaceholder')}
             multiline
             numberOfLines={4}
             maxLength={500}
@@ -403,26 +437,47 @@ export default function BookItemScreen({ navigation, route }: any) {
 
         {/* Price Breakdown */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Price Details</Text>
+          <Text style={styles.sectionTitle}>{t('booking.priceDetails')}</Text>
 
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>
               ${unitPrice.toFixed(2)} x {units} {unitLabel}
             </Text>
-            <Text style={styles.priceValue}>${totalPrice.toFixed(2)}</Text>
+            <Text style={styles.priceValue}>${subtotal.toFixed(2)}</Text>
           </View>
 
+          {discountPercent > 0 && (
+            <View style={styles.priceRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="pricetag" size={14} color={Colors.success} />
+                <Text style={[styles.priceLabel, { color: Colors.success, marginLeft: 4 }]}>
+                  {discountLabel} ({discountPercent}% off)
+                </Text>
+              </View>
+              <Text style={[styles.priceValue, { color: Colors.success }]}>-${discountAmount.toFixed(2)}</Text>
+            </View>
+          )}
+
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Service Fee ({Math.round(feePercent * 100)}%)</Text>
+            <Text style={styles.priceLabel}>{t('booking.serviceFee')} ({Math.round(feePercent * 100)}%)</Text>
             <Text style={styles.priceValue}>${serviceFee.toFixed(2)}</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.priceRow}>
-            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalLabel}>{t('booking.total')}</Text>
             <Text style={styles.totalValue}>${finalTotal.toFixed(2)}</Text>
           </View>
+
+          {discountPercent > 0 && (
+            <View style={{ backgroundColor: '#F0FFF4', borderRadius: 8, padding: 10, marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+              <Text style={{ fontSize: 13, color: Colors.success, marginLeft: 6, fontWeight: '600' }}>
+                You're saving ${discountAmount.toFixed(2)} with the {discountLabel.toLowerCase()}!
+              </Text>
+            </View>
+          )}
 
           <View style={styles.infoBox}>
             <Ionicons name="information-circle-outline" size={20} color={Colors.secondary} />
@@ -478,7 +533,7 @@ export default function BookItemScreen({ navigation, route }: any) {
           disabled={loading}
         >
           <Text style={styles.submitButtonText}>
-            {loading ? 'Sending...' : 'Request to Book'}
+            {loading ? t('common.loading') : t('booking.requestBooking')}
           </Text>
         </TouchableOpacity>
       </View>

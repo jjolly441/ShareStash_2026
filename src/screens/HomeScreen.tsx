@@ -21,6 +21,7 @@ import Slider from '@react-native-community/slider';
 import { StackNavigationProp } from '@react-navigation/stack';
 import ItemService, { RentalItem } from '../services/ItemService';
 import WishlistService from '../services/WishlistService';
+import { useTranslation } from '../i18n/useTranslation';
 import { AuthContext } from '../contexts/AuthContext';
 
 // Verification Banner - encourages unverified users to verify
@@ -47,6 +48,7 @@ type HomeScreenProps = {
 };
 
 export default function HomeScreen({ navigation }: HomeScreenProps) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<ItemWithDistance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -275,12 +277,18 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
             {item.distance !== undefined && (
               <View style={styles.distanceBadge}>
                 <Ionicons name="location" size={12} color={Colors.secondary} />
-                <Text style={styles.distanceText}>{item.distance} mi away</Text>
+                <Text style={styles.distanceText}>{t('home.miAway', { distance: item.distance })}</Text>
+              </View>
+            )}
+            {(item.viewCount || 0) > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                <Ionicons name="eye-outline" size={11} color="#aaa" />
+                <Text style={{ fontSize: 11, color: '#aaa', marginLeft: 3 }}>{item.viewCount}</Text>
               </View>
             )}
           </View>
           <View style={styles.availabilityBadge}>
-            <Text style={styles.availabilityText}>Available</Text>
+            <Text style={styles.availabilityText}>{t('common.available')}</Text>
           </View>
         </View>
       </View>
@@ -389,13 +397,9 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="search-outline" size={64} color={Colors.text} />
-      <Text style={styles.emptyTitle}>No items found</Text>
+      <Text style={styles.emptyTitle}>{t('home.noItemsFound')}</Text>
       <Text style={styles.emptySubtitle}>
-        {searchQuery 
-          ? 'Try a different search term' 
-          : userLocation 
-          ? `No items within ${radiusMiles} miles. Try increasing the radius.`
-          : 'No items available in this category'}
+        {t('home.noItemsMessage')}
       </Text>
       {userLocation && items.length === 0 && (
         <TouchableOpacity 
@@ -451,7 +455,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           <Ionicons name="search" size={20} color={Colors.text} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search items..."
+            placeholder={t('home.searchPlaceholder')}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />

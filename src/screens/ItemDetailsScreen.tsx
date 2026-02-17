@@ -21,6 +21,7 @@ import MessageService from '../services/MessageService';
 import { ReviewService, Review, ReviewStats } from '../services/ReviewService';
 import { AuthContext } from '../contexts/AuthContext';
 import WishlistService from '../services/WishlistService';
+import { useTranslation } from '../i18n/useTranslation';
 
 const { width } = Dimensions.get('window');
 
@@ -91,6 +92,7 @@ const VerificationBadge: React.FC<VerificationBadgeProps> = ({
 export default function ItemDetailsScreen({ navigation, route }: any) {
   const { itemId } = route.params;
   const { user } = useContext(AuthContext);
+  const { t } = useTranslation();
   const [item, setItem] = useState<RentalItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -111,6 +113,8 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
       const itemData = await ItemService.getItemById(itemId);
       if (itemData) {
         setItem(itemData);
+        // Track view (fire-and-forget, doesn't block UI)
+        ItemService.recordItemView(itemId, user?.id, itemData.ownerId);
         // Check wishlist status
         if (user?.id) {
           setIsFavorite(WishlistService.isFavorite(itemId));
@@ -232,6 +236,8 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
       pricePerHour: item.pricePerHour || null,
       pricePerWeek: item.pricePerWeek || null,
       pricePerMonth: item.pricePerMonth || null,
+      weeklyDiscountPercent: item.weeklyDiscountPercent || null,
+      monthlyDiscountPercent: item.monthlyDiscountPercent || null,
       ownerId: item.ownerId,
       ownerName: item.ownerName,
     });
@@ -377,7 +383,17 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
               <View style={styles.ratingContainer}>
                 <StarRating rating={averageRating} size={20} />
                 <Text style={styles.ratingText}>
-                  {averageRating.toFixed(1)} ({totalReviews} {totalReviews === 1 ? 'review' : 'reviews'})
+                  {averageRating.toFixed(1)} ({totalReviews} {totalReviews === 1 ? t('itemDetails.review') : t('itemDetails.reviews')})
+                </Text>
+              </View>
+            )}
+
+            {/* View Count */}
+            {(item.viewCount || 0) > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: totalReviews > 0 ? 4 : 8 }}>
+                <Ionicons name="eye-outline" size={14} color="#999" />
+                <Text style={{ fontSize: 13, color: '#999', marginLeft: 4 }}>
+                  {item.viewCount} {item.viewCount === 1 ? 'view' : 'views'}
                 </Text>
               </View>
             )}
@@ -401,6 +417,22 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
                 {item.pricePerMonth ? (
                   <View style={{ backgroundColor: '#FFF8F0', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
                     <Text style={{ fontSize: 13, color: '#E67E22', fontWeight: '600' }}>${item.pricePerMonth}/mo</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+            {(item.weeklyDiscountPercent || item.monthlyDiscountPercent) && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {item.weeklyDiscountPercent ? (
+                  <View style={{ backgroundColor: '#F0FFF4', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="pricetag-outline" size={12} color={Colors.success} />
+                    <Text style={{ fontSize: 13, color: Colors.success, fontWeight: '600', marginLeft: 4 }}>{item.weeklyDiscountPercent}% off weekly</Text>
+                  </View>
+                ) : null}
+                {item.monthlyDiscountPercent ? (
+                  <View style={{ backgroundColor: '#F0FFF4', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="pricetag-outline" size={12} color={Colors.success} />
+                    <Text style={{ fontSize: 13, color: Colors.success, fontWeight: '600', marginLeft: 4 }}>{item.monthlyDiscountPercent}% off monthly</Text>
                   </View>
                 ) : null}
               </View>
@@ -482,7 +514,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
 
           {/* Description */}
           <View style={styles.descriptionSection}>
-            <Text style={styles.sectionTitle}>Description</Text>
+            <Text style={styles.sectionTitle}>{t('itemDetails.description')}</Text>
             <Text style={styles.description}>{item.description}</Text>
           </View>
 
@@ -535,7 +567,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
                   <View style={styles.ratingOverview}>
                     <Text style={styles.ratingNumber}>{averageRating.toFixed(1)}</Text>
                     <StarRating rating={averageRating} size={24} />
-                    <Text style={styles.ratingCount}>{totalReviews} reviews</Text>
+                    <Text style={styles.ratingCount}>{totalReviews} {t('itemDetails.reviews')}</Text>
                   </View>
 
                   <View style={styles.ratingBars}>
@@ -601,7 +633,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
             <Text style={styles.bottomPriceSubtext}>Plus applicable fees</Text>
           </View>
           <TouchableOpacity style={styles.rentButton} onPress={handleRentNow}>
-            <Text style={styles.rentButtonText}>Rent Now</Text>
+            <Text style={styles.rentButtonText}>{t('itemDetails.bookNow')}</Text>
           </TouchableOpacity>
         </View>
       )}
