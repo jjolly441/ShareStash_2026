@@ -149,6 +149,11 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
   const [feeInput, setFeeInput] = useState<string>('10');
   const [feeSaving, setFeeSaving] = useState(false);
   const [feeLastUpdated, setFeeLastUpdated] = useState<string | null>(null);
+  const [tieredFeesEnabled, setTieredFeesEnabled] = useState(false);
+  const [feeTiers, setFeeTiers] = useState(SettingsService.getDefaultFeeTiers());
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
+  const [loyaltyThreshold, setLoyaltyThreshold] = useState('10');
+  const [loyaltyDiscount, setLoyaltyDiscount] = useState('2');
 
   useEffect(() => {
     fetchDashboardData();
@@ -237,6 +242,13 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
         const settings = await SettingsService.getSettings(true);
         setCurrentFeePercent(settings.serviceFeePercent);
         setFeeInput(settings.serviceFeePercent.toString());
+        setTieredFeesEnabled(settings.tieredFeesEnabled || false);
+        if (settings.feeTiers && settings.feeTiers.length > 0) {
+          setFeeTiers(settings.feeTiers);
+        }
+        setLoyaltyEnabled(settings.loyaltyDiscountEnabled || false);
+        setLoyaltyThreshold((settings.loyaltyThreshold || 10).toString());
+        setLoyaltyDiscount((settings.loyaltyDiscountPercent || 2).toString());
         if (settings.updatedAt) {
           const date = (settings.updatedAt as any).toDate
             ? (settings.updatedAt as any).toDate()
@@ -527,6 +539,35 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
 
   // Render components
   // Service fee handler
+  // Save tiered fee settings
+  const handleSaveTieredSettings = async () => {
+    try {
+      setFeeSaving(true);
+      await SettingsService.updateSettings(
+        {
+          tieredFeesEnabled,
+          feeTiers,
+          loyaltyDiscountEnabled: loyaltyEnabled,
+          loyaltyThreshold: parseInt(loyaltyThreshold) || 10,
+          loyaltyDiscountPercent: parseFloat(loyaltyDiscount) || 2,
+        },
+        user?.id || 'admin'
+      );
+      Alert.alert('Success', 'Fee settings updated successfully.');
+      fetchDashboardData();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update fee settings.');
+    } finally {
+      setFeeSaving(false);
+    }
+  };
+
+  const updateTierFee = (tierId: string, newPercent: string) => {
+    const val = parseFloat(newPercent);
+    if (isNaN(val)) return;
+    setFeeTiers(prev => prev.map(t => t.id === tierId ? { ...t, feePercent: val } : t));
+  };
+
   const handleSaveFee = async () => {
     const newFee = parseFloat(feeInput);
     if (isNaN(newFee) || newFee < 0 || newFee > 50) {
@@ -733,8 +774,9 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
           <Text style={styles.cardTitle}>Platform Settings</Text>
         </View>
 
+        {/* Default Flat Fee */}
         <View style={styles.statRow}>
-          <Text style={styles.statRowLabel}>Current Service Fee</Text>
+          <Text style={styles.statRowLabel}>Default Service Fee</Text>
           <Text style={[styles.statRowValue, { color: Colors.admin, fontWeight: 'bold' }]}>
             {currentFeePercent}%
           </Text>
@@ -749,7 +791,7 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
 
         <View style={[styles.borderTop, { paddingTop: 12, marginTop: 8 }]}>
           <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 8 }}>
-            Update Service Fee
+            Update Default Fee
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <View style={{
@@ -784,13 +826,161 @@ export default function AdminDashboard({ navigation }: AdminDashboardProps) {
               )}
             </TouchableOpacity>
           </View>
+        </View>
 
-          <View style={[styles.infoBox, { marginTop: 10 }]}>
-            <Ionicons name="information-circle" size={16} color={Colors.secondary} />
-            <Text style={styles.infoText}>
-              Fee is deducted from the owner's payout. Enter a value between 0-50%. Changes apply to all future transactions.
-            </Text>
-          </View>
+        {/* Tiered Fees Toggle */}
+        <View style={[styles.borderTop, { paddingTop: 16, marginTop: 12 }]}>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}
+            onPress={() => setTieredFeesEnabled(!tieredFeesEnabled)}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text }}>Tiered Service Fees</Text>
+              <Text style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                Different fee rates based on rental value
+              </Text>
+            </View>
+            <View style={{
+              width: 50, height: 28, borderRadius: 14,
+              backgroundColor: tieredFeesEnabled ? Colors.success : '#D1D5DB',
+              justifyContent: 'center',
+              paddingHorizontal: 3,
+            }}>
+              <View style={{
+                width: 22, height: 22, borderRadius: 11,
+                backgroundColor: Colors.white,
+                alignSelf: tieredFeesEnabled ? 'flex-end' : 'flex-start',
+              }} />
+            </View>
+          </TouchableOpacity>
+
+          {tieredFeesEnabled && (
+            <View style={{ gap: 8 }}>
+              {feeTiers.map((tier) => (
+                <View key={tier.id} style={{
+                  flexDirection: 'row', alignItems: 'center',
+                  backgroundColor: Colors.background, borderRadius: 10, padding: 12,
+                  borderWidth: 1, borderColor: Colors.border,
+                }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.text }}>{tier.name}</Text>
+                    <Text style={{ fontSize: 11, color: '#666' }}>{tier.description}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <TextInput
+                      style={{
+                        width: 50, fontSize: 16, fontWeight: '700', color: Colors.admin,
+                        textAlign: 'center', backgroundColor: Colors.white,
+                        borderRadius: 8, borderWidth: 1, borderColor: Colors.border,
+                        paddingVertical: 6,
+                      }}
+                      value={tier.feePercent.toString()}
+                      onChangeText={(val) => updateTierFee(tier.id, val)}
+                      keyboardType="decimal-pad"
+                      maxLength={4}
+                    />
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.admin }}>%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Loyalty Discount Toggle */}
+        <View style={[styles.borderTop, { paddingTop: 16, marginTop: 12 }]}>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}
+            onPress={() => setLoyaltyEnabled(!loyaltyEnabled)}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text }}>Loyalty Discount</Text>
+              <Text style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                Reduce fees for frequent renters
+              </Text>
+            </View>
+            <View style={{
+              width: 50, height: 28, borderRadius: 14,
+              backgroundColor: loyaltyEnabled ? Colors.success : '#D1D5DB',
+              justifyContent: 'center',
+              paddingHorizontal: 3,
+            }}>
+              <View style={{
+                width: 22, height: 22, borderRadius: 11,
+                backgroundColor: Colors.white,
+                alignSelf: loyaltyEnabled ? 'flex-end' : 'flex-start',
+              }} />
+            </View>
+          </TouchableOpacity>
+
+          {loyaltyEnabled && (
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>
+                  Rentals to qualify
+                </Text>
+                <TextInput
+                  style={{
+                    fontSize: 16, fontWeight: '600', color: Colors.text,
+                    backgroundColor: Colors.background, borderRadius: 10,
+                    borderWidth: 1, borderColor: Colors.border,
+                    paddingHorizontal: 12, paddingVertical: 10,
+                  }}
+                  value={loyaltyThreshold}
+                  onChangeText={setLoyaltyThreshold}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>
+                  Fee discount (%)
+                </Text>
+                <TextInput
+                  style={{
+                    fontSize: 16, fontWeight: '600', color: Colors.text,
+                    backgroundColor: Colors.background, borderRadius: 10,
+                    borderWidth: 1, borderColor: Colors.border,
+                    paddingHorizontal: 12, paddingVertical: 10,
+                  }}
+                  value={loyaltyDiscount}
+                  onChangeText={setLoyaltyDiscount}
+                  keyboardType="decimal-pad"
+                  maxLength={4}
+                />
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Save Tiered/Loyalty Settings */}
+        {(tieredFeesEnabled || loyaltyEnabled) && (
+          <TouchableOpacity
+            style={{
+              backgroundColor: Colors.admin, borderRadius: 10,
+              paddingVertical: 12, alignItems: 'center', marginTop: 12,
+              opacity: feeSaving ? 0.6 : 1,
+            }}
+            onPress={handleSaveTieredSettings}
+            disabled={feeSaving}
+          >
+            {feeSaving ? (
+              <ActivityIndicator color={Colors.white} size="small" />
+            ) : (
+              <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 15 }}>
+                Save Fee Settings
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        <View style={[styles.infoBox, { marginTop: 10 }]}>
+          <Ionicons name="information-circle" size={16} color={Colors.secondary} />
+          <Text style={styles.infoText}>
+            {tieredFeesEnabled
+              ? 'Tiered fees apply different rates based on rental value. The default fee is used as fallback.'
+              : 'Fee is deducted from the owner\'s payout. Enter a value between 0-50%. Changes apply to all future transactions.'}
+          </Text>
         </View>
       </View>
     </ScrollView>

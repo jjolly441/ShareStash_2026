@@ -65,8 +65,34 @@ export default function BookItemScreen({ navigation, route }: any) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [feePercent, setFeePercent] = useState(0.10);
+  const [feeTierName, setFeeTierName] = useState('');
+  const [loyaltyApplied, setLoyaltyApplied] = useState(false);
+  const [loyaltyDiscount, setLoyaltyDiscount] = useState(0);
   const [insuranceTier, setInsuranceTier] = useState<InsuranceTier>('none');
   const [insurancePremium, setInsurancePremium] = useState(0);
+
+  // Load fee — will re-run when rental price changes
+  const loadFee = async (rentalAmount: number) => {
+    try {
+      // Get user's completed rental count for loyalty discount
+      let completedCount = 0;
+      if (user?.id) {
+        try {
+          const { collection: col, query: q, where: w, getDocs: gd } = require('firebase/firestore');
+          const { db: database } = require('../config/firebase');
+          const snap = await gd(q(col(database, 'rentals'), w('renterId', '==', user.id), w('status', '==', 'completed')));
+          completedCount = snap.size;
+        } catch {}
+      }
+      const breakdown = await SettingsService.getFeeBreakdown(rentalAmount, completedCount);
+      setFeePercent(breakdown.finalFeePercent / 100);
+      setFeeTierName(breakdown.isTiered ? breakdown.tierName : '');
+      setLoyaltyApplied(breakdown.isLoyaltyApplied);
+      setLoyaltyDiscount(breakdown.loyaltyDiscount);
+    } catch {
+      SettingsService.getServiceFeeDecimal().then(fee => setFeePercent(fee)).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     SettingsService.getServiceFeeDecimal().then(fee => setFeePercent(fee)).catch(() => {});
@@ -119,6 +145,13 @@ export default function BookItemScreen({ navigation, route }: any) {
   };
 
   const { units, unitPrice, unitLabel, subtotal, discountPercent, discountLabel, discountAmount, totalPrice, serviceFee, finalTotal, totalDays } = calculateRentalDetails();
+
+  // Recalculate tiered fee when rental price changes
+  useEffect(() => {
+    if (totalPrice > 0) {
+      loadFee(totalPrice);
+    }
+  }, [totalPrice]);
 
   const handleStartDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
@@ -483,9 +516,27 @@ export default function BookItemScreen({ navigation, route }: any) {
           )}
 
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>{t('booking.serviceFee')} ({Math.round(feePercent * 100)}%)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <Text style={styles.priceLabel}>
+                {t('booking.serviceFee')} ({Math.round(feePercent * 100)}%)
+              </Text>
+              {feeTierName ? (
+                <View style={{ backgroundColor: '#2E86AB15', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 }}>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#2E86AB' }}>{feeTierName}</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={styles.priceValue}>${serviceFee.toFixed(2)}</Text>
           </View>
+
+          {loyaltyApplied ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: -4, marginBottom: 4, paddingLeft: 2 }}>
+              <Ionicons name="star" size={12} color="#F59E0B" />
+              <Text style={{ fontSize: 11, color: '#F59E0B', marginLeft: 4, fontWeight: '600' }}>
+                Loyalty discount applied (-{loyaltyDiscount}%)
+              </Text>
+            </View>
+          ) : null}
 
           {insurancePremium > 0 && (
             <View style={styles.priceRow}>
