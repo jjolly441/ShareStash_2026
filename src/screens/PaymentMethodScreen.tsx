@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { CardField, useStripe } from '@stripe/stripe-react-native';
+import { CardField, useStripe } from '../components/NativeStripe';
 import { useFocusEffect } from '@react-navigation/native';
 import { auth } from '../config/firebase';
 import { AuthContext } from '../contexts/AuthContext';

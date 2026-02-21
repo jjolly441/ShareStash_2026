@@ -1,10 +1,18 @@
 // src/services/NotificationService.ts
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 import { doc, setDoc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+
+// Conditionally import native-only modules
+let Notifications: any = null;
+let Device: any = null;
+let Constants: any = null;
+
+if (Platform.OS !== 'web') {
+  try { Notifications = require('expo-notifications'); } catch {}
+  try { Device = require('expo-device'); } catch {}
+  try { Constants = require('expo-constants'); } catch {}
+}
 
 
 
@@ -43,6 +51,12 @@ class NotificationService {
    * Initialize notification service and request permissions
    */
   async initialize(userId: string): Promise<void> {
+    // Push notifications not available on web
+    if (Platform.OS === 'web' || !Notifications) {
+      console.log('Push notifications not available on web');
+      return;
+    }
+
     try {
       // Request permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -86,6 +100,7 @@ class NotificationService {
    */
   private async getPushToken(): Promise<string | null> {
   try {
+    if (Platform.OS === 'web' || !Device || !Notifications || !Constants) return null;
     if (!Device.isDevice) {
       console.log('📱 Push notifications require a physical device');
       return null;
@@ -405,11 +420,16 @@ class NotificationService {
    * Setup notification listeners
    */
   setupNotificationListeners(
-    onNotificationReceived?: (notification: Notifications.Notification) => void,
-    onNotificationTapped?: (response: Notifications.NotificationResponse) => void
+    onNotificationReceived?: (notification: any) => void,
+    onNotificationTapped?: (response: any) => void
   ) {
+    // Not available on web
+    if (Platform.OS === 'web' || !Notifications) {
+      return { remove: () => {} };
+    }
+
     // Notification received while app is foregrounded
-    const receivedListener = Notifications.addNotificationReceivedListener((notification) => {
+    const receivedListener = Notifications.addNotificationReceivedListener((notification: any) => {
       console.log('Notification received:', notification);
       if (onNotificationReceived) {
         onNotificationReceived(notification);

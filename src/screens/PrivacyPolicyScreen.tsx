@@ -180,5 +180,4 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 14, marginTop: 16, gap: 10,
   },
   disclaimerText: { flex: 1, fontSize: 13, color: '#856404', lineHeight: 20 },
-  warning: '#FF9800',
 });

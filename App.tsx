@@ -5,29 +5,30 @@
 // FIXED: AddItemScreen type error in Tab Navigator
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Linking, Alert } from 'react-native';
+import { StyleSheet, Linking, Alert, Platform } from 'react-native';
+import { enableScreens } from 'react-native-screens';
+
+// Disable native screens on web to avoid WeakMap errors
+if (Platform.OS === 'web') {
+  enableScreens(false);
+}
+
 import { NavigationContainer, LinkingOptions, NavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { StripeProvider } from '@stripe/stripe-react-native';
 import { AuthProvider, AuthContext } from './src/contexts/AuthContext';
 import NotificationService from './src/services/NotificationService';
 import { initializeLanguage, t as translate } from './src/i18n';
-import * as Notifications from 'expo-notifications';
+import { isWeb } from './src/utils/platform';
+
+// Platform-specific Stripe provider
+import StripeProviderWrapper from './src/components/web/StripeProviderWeb';
+
+// Notifications (web-safe — the service handles platform checks internally)
 
 // Initialize language preference (loads from AsyncStorage)
 initializeLanguage();
-
-// Configure foreground notification behavior - show banner even when app is open
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
 
 // Auth Screens
 import LoginScreen from './src/screens/auth/LoginScreen';
@@ -84,23 +85,30 @@ const linking: LinkingOptions<RootStackParamList> = {
   prefixes: ['peerrentalapp://', 'https://peerrentalapp.com'],
   config: {
     screens: {
-      // Stripe Connect deep links
-      StripeConnect: {
-        path: 'stripe-connect-return',
+      Login: 'login',
+      Register: 'register',
+      MainTabs: {
+        path: '',
+        screens: {
+          Home: 'browse',
+          Rentals: 'rentals',
+          AddItem: 'list-item',
+          Messages: 'messages',
+          Profile: 'profile',
+        },
       },
-      // Identity verification deep link
-      VerifyIdentity: {
-        path: 'identity-verification-complete',
-      },
-      // Payment completion deep link
-      Checkout: {
-        path: 'payment-complete',
-      },
-      // Other deep links
       ItemDetails: 'item/:itemId',
+      BookItem: 'book/:itemId',
+      Checkout: 'checkout/:rentalId',
+      PublicProfile: 'user/:userId',
+      // Deep links
+      StripeConnect: 'stripe-connect-return',
+      VerifyIdentity: 'identity-verification-complete',
       Chat: 'chat/:conversationId',
-      Rentals: 'rentals',
       Notifications: 'notifications',
+      HelpCenter: 'help',
+      PrivacyPolicy: 'privacy',
+      TermsOfService: 'terms',
     },
   },
 };
@@ -175,13 +183,9 @@ function VerificationReminderHandler() {
 export default function App() {
   return (
     <AuthProvider>
-      <StripeProvider 
-        publishableKey={STRIPE_PUBLISHABLE_KEY}
-        merchantIdentifier="merchant.com.peerrentalapp"
-        urlScheme="peerrentalapp"
-      >
+      <StripeProviderWrapper>
         <AppContent />
-      </StripeProvider>
+      </StripeProviderWrapper>
     </AuthProvider>
   );
 }
@@ -200,9 +204,9 @@ function AppContent() {
     }
   }, [user]);
 
-  // Initialize notifications
+  // Initialize notifications (native only)
   useEffect(() => {
-    if (user) {
+    if (user && !isWeb) {
       NotificationService.initialize(user.id);
 
       const listeners = NotificationService.setupNotificationListeners(

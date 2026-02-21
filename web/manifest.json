@@ -1,0 +1,21 @@
+{
+  "short_name": "ShareStash",
+  "name": "ShareStash — Rent Anything from People Nearby",
+  "description": "Peer-to-peer rental marketplace. Rent tools, electronics, sports gear, and more from people in your neighborhood.",
+  "icons": [
+    {
+      "src": "/assets/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#F5C542",
+  "background_color": "#F8F9FA"
+}

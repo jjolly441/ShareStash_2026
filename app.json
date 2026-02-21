@@ -39,7 +39,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "ShareStash",
+      "shortName": "ShareStash",
+      "description": "Rent anything from people nearby",
+      "themeColor": "#F5C542",
+      "backgroundColor": "#F8F9FA"
     },
     "scheme": "peerrentalapp",
     "plugins": [

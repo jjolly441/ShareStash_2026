@@ -17,8 +17,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
-import MapView, { Marker, Region } from 'react-native-maps';
+import { MapView, Marker } from '../components/NativeMap';
 import * as Location from 'expo-location';
+
+type Region = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
 import { doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { RentalService, Rental } from '../services/RentalService';
@@ -289,7 +291,7 @@ export default function MeetingLocationScreen({ navigation, route }: Props) {
                 latitude: pin.latitude,
                 longitude: pin.longitude,
                 address,
-                notes: notes || '',
+                notes: notes || undefined,
                 proposedBy: user.id,
                 proposedByName: `${user.firstName} ${user.lastName}`,
                 status: 'proposed',

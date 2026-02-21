@@ -15,9 +15,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker } from 'react-native-maps';
+import Slider from '../components/NativeSlider';
+import { MapView, Marker } from '../components/NativeMap';
 import * as Location from 'expo-location';
-import Slider from '@react-native-community/slider';
+import { isWeb } from '../utils/platform';
 import { StackNavigationProp } from '@react-navigation/stack';
 import ItemService, { RentalItem } from '../services/ItemService';
 import WishlistService from '../services/WishlistService';
@@ -309,6 +310,19 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
   );
 
   const renderMapView = () => {
+    // Maps not available on web
+    if (isWeb) {
+      return (
+        <View style={styles.mapPlaceholder}>
+          <Ionicons name="map-outline" size={64} color={Colors.text} />
+          <Text style={styles.mapPlaceholderTitle}>Map View</Text>
+          <Text style={styles.mapPlaceholderText}>
+            Map view is available in the ShareStash mobile app
+          </Text>
+        </View>
+      );
+    }
+
     if (!userLocation) {
       return (
         <View style={styles.mapPlaceholder}>
@@ -377,7 +391,6 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
               onValueChange={setRadiusMiles}
               minimumTrackTintColor={Colors.secondary}
               maximumTrackTintColor={Colors.border}
-              thumbTintColor={Colors.secondary}
             />
             <View style={styles.sliderLabels}>
               <Text style={styles.sliderLabel}>5 mi</Text>
@@ -484,6 +497,10 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           style={styles.itemsList}
+          numColumns={isWeb && Dimensions.get('window').width >= 768 ? (Dimensions.get('window').width >= 1024 ? 3 : 2) : 1}
+          key={isWeb ? (Dimensions.get('window').width >= 1024 ? '3col' : Dimensions.get('window').width >= 768 ? '2col' : '1col') : '1col'}
+          columnWrapperStyle={isWeb && Dimensions.get('window').width >= 768 ? { gap: 12 } : undefined}
+          contentContainerStyle={isWeb ? { maxWidth: 1200, alignSelf: 'center', width: '100%', paddingHorizontal: 16 } : undefined}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -604,6 +621,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: 'hidden',
+    flex: 1,
   },
   itemImage: {
     width: '100%',
@@ -848,3 +866,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+
