@@ -27,6 +27,8 @@ import {
   VerificationService,
   VerificationStatus,
 } from '../services/VerificationService';
+import TrustScoreService, { TrustScoreBreakdown } from '../services/TrustScoreService';
+import { TrustScoreCard } from '../components/TrustScoreBadge';
 import { resetOnboarding } from './OnboardingScreen';
 
 
@@ -149,6 +151,7 @@ export default function ProfileScreen() {
   const [verificationStatus, setVerificationStatus] =
     useState<VerificationStatus | null>(null);
   const [loadingVerification, setLoadingVerification] = useState(true);
+  const [trustScore, setTrustScore] = useState<TrustScoreBreakdown | null>(null);
 
   // ==========================================================================
   // DATA LOADING
@@ -189,12 +192,23 @@ export default function ProfileScreen() {
     }
   };
 
+  const loadTrustScore = async () => {
+    if (!user) return;
+    try {
+      const score = await TrustScoreService.computeTrustScore(user.id);
+      setTrustScore(score);
+    } catch (error) {
+      console.error('Error loading trust score:', error);
+    }
+  };
+
   // Reload data when screen is focused
   useFocusEffect(
     React.useCallback(() => {
       loadUnreadCount();
       loadUserRating();
       loadVerificationStatus();
+      loadTrustScore();
       loadReferralProfile();
     }, [user])
   );
@@ -206,7 +220,7 @@ export default function ProfileScreen() {
     loadReferralProfile();
   }, []);
 
-  const loadReferralProfile = async () => {
+  const loadReferralProfile = async (retryCount = 0) => {
     if (!user?.id) return;
     try {
       const profile = await ReferralService.getOrCreateReferralProfile(user.id);
@@ -214,7 +228,12 @@ export default function ProfileScreen() {
       const codes = await ReferralService.getUserRewardCodes(user.id);
       setRewardCodes(codes);
     } catch (error) {
-      console.warn('Failed to load referral profile:', error);
+      // Retry up to 3 times with increasing delay (auth may not be ready)
+      if (retryCount < 3) {
+        setTimeout(() => loadReferralProfile(retryCount + 1), (retryCount + 1) * 2000);
+      } else {
+        console.warn('Failed to load referral profile after retries:', error);
+      }
     }
   };
 
@@ -364,6 +383,20 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
+
+          {/* ================================================================ */}
+          {/* TRUST SCORE SECTION */}
+          {/* ================================================================ */}
+          {trustScore && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Trust Score</Text>
+              <TrustScoreCard
+                breakdown={trustScore}
+                showBreakdown={true}
+                isOwnProfile={true}
+              />
+            </View>
+          )}
 
           {/* ================================================================ */}
           {/* VERIFICATION SECTION - NEW */}

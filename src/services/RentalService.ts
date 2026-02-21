@@ -14,6 +14,7 @@ import {
 import { db } from '../config/firebase';
 import { PayoutService } from './PayoutService';
 import NotificationService from './NotificationService';
+import SecurityDepositService from './SecurityDepositService';
 
 // ============================================================================
 // CONFIRMATION NUMBER GENERATOR - Issue #9
@@ -88,6 +89,10 @@ export interface Rental {
   // Fraud protection (Layer 4 — auto-complete)
   autoCompleteAt?: Timestamp;       // endDate + 3 days
   autoCompleteReminders?: number;   // count of reminders sent (0, 1, 2)
+  // Security deposit
+  securityDeposit?: number;           // Deposit amount in dollars
+  depositId?: string;                  // Reference to securityDeposits collection
+  depositStatus?: 'pending' | 'held' | 'released' | 'partial_claim' | 'full_claim' | 'failed' | 'expired';
 }
 
 class RentalServiceClass {
@@ -364,6 +369,19 @@ class RentalServiceClass {
           payoutEligibleAt: Timestamp.fromDate(payoutEligibleDate),
           payoutFrozen: false,
         });
+
+        // Auto-release security deposit (no damage reported)
+        if (rental.securityDeposit && rental.securityDeposit > 0) {
+          try {
+            const deposit = await SecurityDepositService.getDepositByRentalId(rentalId);
+            if (deposit?.id && SecurityDepositService.canRelease(deposit)) {
+              await SecurityDepositService.releaseDeposit(deposit.id);
+              console.log('Security deposit released for rental:', rentalId);
+            }
+          } catch (depositError) {
+            console.warn('Failed to auto-release deposit (non-blocking):', depositError);
+          }
+        }
 
         // 🔔 Notify both parties
         await NotificationService.sendNotificationToUser(

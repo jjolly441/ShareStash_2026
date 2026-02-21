@@ -15,7 +15,7 @@ import { db, storage } from '../config/firebase';
 import NotificationService from './NotificationService';
 
 export type DisputeType = 'damage' | 'not_as_described' | 'late_return' | 'payment_issue' | 'other';
-export type DisputeStatus = 'open' | 'investigating' | 'resolved' | 'closed';
+export type DisputeStatus = 'open' | 'awaiting_response' | 'investigating' | 'proposed_resolution' | 'resolved' | 'closed' | 'escalated';
 export type DisputeResolvedBy = 'admin' | 'mutual_agreement' | 'refund_issued' | 'no_action';
 
 export interface DamagePhoto {
@@ -23,6 +23,31 @@ export interface DamagePhoto {
   url?: string;
   description: string;
   timestamp: string;
+}
+
+export interface DisputeActivity {
+  id: string;
+  type: 'created' | 'response' | 'message' | 'status_change' | 'resolution_proposed' | 'resolution_accepted' | 'resolution_rejected' | 'escalated' | 'admin_note' | 'refund_issued';
+  userId: string;
+  userName: string;
+  content: string;
+  photos?: DamagePhoto[];
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface ResolutionProposal {
+  id: string;
+  proposedBy: string;
+  proposedByName: string;
+  type: 'full_refund' | 'partial_refund' | 'replacement' | 'repair_cost' | 'no_action' | 'other';
+  amount?: number;
+  description: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  respondedAt?: string;
+  respondedBy?: string;
+  rejectionReason?: string;
+  createdAt: string;
 }
 
 export interface Dispute {
@@ -46,6 +71,15 @@ export interface Dispute {
   resolvedBy?: DisputeResolvedBy;
   resolutionNotes?: string;
   adminNotes?: string;
+
+  // New resolution fields
+  counterResponse?: string;
+  counterResponsePhotos?: DamagePhoto[];
+  counterResponseAt?: string;
+  activities?: DisputeActivity[];
+  resolutionProposals?: ResolutionProposal[];
+  escalatedAt?: string;
+  escalationReason?: string;
 }
 
 export interface UserReport {
@@ -107,7 +141,17 @@ class DisputeService {
         type: disputeData.type,
         description: disputeData.description,
         damagePhotos: disputeData.damagePhotos,
-        status: 'open',
+        status: 'awaiting_response',
+        activities: [{
+          id: `act_${Date.now()}`,
+          type: 'created',
+          userId: disputeData.reporterId,
+          userName: disputeData.reporterName,
+          content: `Dispute filed: ${disputeData.description}`,
+          photos: disputeData.damagePhotos.length > 0 ? disputeData.damagePhotos : undefined,
+          createdAt: new Date().toISOString(),
+        }],
+        resolutionProposals: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -534,6 +578,348 @@ class DisputeService {
     }
   }
 
+  // ============================================================================
+  // DISPUTE RESOLUTION METHODS
+  // ============================================================================
+
+  // Submit a counter-response (accused party's side of the story)
+  async submitCounterResponse(
+    disputeId: string,
+    userId: string,
+    userName: string,
+    response: string,
+    photos: DamagePhoto[] = []
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const disputeRef = doc(db, 'disputes', disputeId);
+      const disputeDoc = await getDoc(disputeRef);
+      if (!disputeDoc.exists()) return { success: false, error: 'Dispute not found' };
+
+      const dispute = disputeDoc.data() as Dispute;
+
+      // Only the accused can respond
+      if (dispute.accusedId !== userId) {
+        return { success: false, error: 'Only the accused party can submit a response' };
+      }
+
+      // Upload photos
+      let photosWithUrls = photos;
+      if (photos.length > 0) {
+        photosWithUrls = await Promise.all(
+          photos.map(async (photo) => {
+            if (photo.uri && !photo.uri.startsWith('http')) {
+              const url = await this.uploadDamagePhoto(photo.uri, disputeId);
+              return { ...photo, url };
+            }
+            return photo;
+          })
+        );
+      }
+
+      // Add activity log entry
+      const activity: DisputeActivity = {
+        id: `act_${Date.now()}`,
+        type: 'response',
+        userId,
+        userName,
+        content: response,
+        photos: photosWithUrls.length > 0 ? photosWithUrls : undefined,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingActivities = dispute.activities || [];
+
+      await updateDoc(disputeRef, {
+        counterResponse: response,
+        counterResponsePhotos: photosWithUrls,
+        counterResponseAt: new Date().toISOString(),
+        status: 'investigating',
+        activities: [...existingActivities, activity],
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Notify reporter
+      await NotificationService.sendNotificationToUser(
+        dispute.reporterId,
+        '💬 Response Received',
+        `${userName} has responded to your dispute regarding "${dispute.itemName}"`,
+        { type: 'dispute_response', disputeId, screen: 'DisputeDetails' }
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error submitting counter response:', error);
+      return { success: false, error: 'Failed to submit response' };
+    }
+  }
+
+  // Add a message to the dispute (either party or admin)
+  async addDisputeMessage(
+    disputeId: string,
+    userId: string,
+    userName: string,
+    message: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const disputeRef = doc(db, 'disputes', disputeId);
+      const disputeDoc = await getDoc(disputeRef);
+      if (!disputeDoc.exists()) return { success: false, error: 'Dispute not found' };
+
+      const dispute = disputeDoc.data() as Dispute;
+
+      // Only involved parties can message
+      if (dispute.reporterId !== userId && dispute.accusedId !== userId) {
+        return { success: false, error: 'Only involved parties can add messages' };
+      }
+
+      const activity: DisputeActivity = {
+        id: `act_${Date.now()}`,
+        type: 'message',
+        userId,
+        userName,
+        content: message,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingActivities = dispute.activities || [];
+
+      await updateDoc(disputeRef, {
+        activities: [...existingActivities, activity],
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Notify the other party
+      const otherUserId = dispute.reporterId === userId ? dispute.accusedId : dispute.reporterId;
+      await NotificationService.sendNotificationToUser(
+        otherUserId,
+        '💬 New Dispute Message',
+        `${userName} sent a message regarding the dispute for "${dispute.itemName}"`,
+        { type: 'dispute_message', disputeId, screen: 'DisputeDetails' }
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding dispute message:', error);
+      return { success: false, error: 'Failed to send message' };
+    }
+  }
+
+  // Propose a resolution (either party)
+  async proposeResolution(
+    disputeId: string,
+    userId: string,
+    userName: string,
+    type: ResolutionProposal['type'],
+    description: string,
+    amount?: number
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const disputeRef = doc(db, 'disputes', disputeId);
+      const disputeDoc = await getDoc(disputeRef);
+      if (!disputeDoc.exists()) return { success: false, error: 'Dispute not found' };
+
+      const dispute = disputeDoc.data() as Dispute;
+
+      if (dispute.reporterId !== userId && dispute.accusedId !== userId) {
+        return { success: false, error: 'Only involved parties can propose resolutions' };
+      }
+
+      const proposal: ResolutionProposal = {
+        id: `prop_${Date.now()}`,
+        proposedBy: userId,
+        proposedByName: userName,
+        type,
+        amount,
+        description,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      };
+
+      const activity: DisputeActivity = {
+        id: `act_${Date.now()}`,
+        type: 'resolution_proposed',
+        userId,
+        userName,
+        content: `Proposed resolution: ${this.getResolutionTypeLabel(type)}${amount ? ` — $${amount.toFixed(2)}` : ''} — ${description}`,
+        metadata: { proposalId: proposal.id, type, amount },
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingProposals = dispute.resolutionProposals || [];
+      const existingActivities = dispute.activities || [];
+
+      await updateDoc(disputeRef, {
+        resolutionProposals: [...existingProposals, proposal],
+        activities: [...existingActivities, activity],
+        status: 'proposed_resolution',
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Notify the other party
+      const otherUserId = dispute.reporterId === userId ? dispute.accusedId : dispute.reporterId;
+      await NotificationService.sendNotificationToUser(
+        otherUserId,
+        '🤝 Resolution Proposed',
+        `${userName} proposed a resolution for the dispute regarding "${dispute.itemName}"`,
+        { type: 'dispute_resolution_proposed', disputeId, screen: 'DisputeDetails' }
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error proposing resolution:', error);
+      return { success: false, error: 'Failed to propose resolution' };
+    }
+  }
+
+  // Respond to a resolution proposal
+  async respondToProposal(
+    disputeId: string,
+    proposalId: string,
+    userId: string,
+    userName: string,
+    accept: boolean,
+    rejectionReason?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const disputeRef = doc(db, 'disputes', disputeId);
+      const disputeDoc = await getDoc(disputeRef);
+      if (!disputeDoc.exists()) return { success: false, error: 'Dispute not found' };
+
+      const dispute = disputeDoc.data() as Dispute;
+      const proposals = dispute.resolutionProposals || [];
+      const proposalIndex = proposals.findIndex((p: ResolutionProposal) => p.id === proposalId);
+
+      if (proposalIndex === -1) return { success: false, error: 'Proposal not found' };
+
+      const proposal = proposals[proposalIndex];
+
+      // Can't respond to your own proposal
+      if (proposal.proposedBy === userId) {
+        return { success: false, error: 'You cannot respond to your own proposal' };
+      }
+
+     // Update the proposal
+      const updatedProposal: any = {
+        ...proposal,
+        status: accept ? 'accepted' : 'rejected',
+        respondedAt: new Date().toISOString(),
+        respondedBy: userId,
+      };
+      if (!accept && rejectionReason) {
+        updatedProposal.rejectionReason = rejectionReason;
+      }
+      proposals[proposalIndex] = updatedProposal;
+
+      const activity: DisputeActivity = {
+        id: `act_${Date.now()}`,
+        type: accept ? 'resolution_accepted' : 'resolution_rejected',
+        userId,
+        userName,
+        content: accept
+          ? `Accepted the proposed resolution: ${this.getResolutionTypeLabel(proposal.type)}`
+          : `Rejected the proposed resolution${rejectionReason ? `: ${rejectionReason}` : ''}`,
+        metadata: { proposalId, accepted: accept },
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingActivities = dispute.activities || [];
+
+      const updateData: any = {
+        resolutionProposals: proposals,
+        activities: [...existingActivities, activity],
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (accept) {
+        updateData.status = 'resolved';
+        updateData.resolvedAt = new Date().toISOString();
+        updateData.resolvedBy = 'mutual_agreement';
+        updateData.resolutionNotes = `${proposal.proposedByName}'s proposal accepted: ${this.getResolutionTypeLabel(proposal.type)}${proposal.amount ? ` — $${proposal.amount.toFixed(2)}` : ''} — ${proposal.description}`;
+      } else {
+        updateData.status = 'investigating';
+      }
+
+      await updateDoc(disputeRef, updateData);
+
+      // Notify the proposer
+      await NotificationService.sendNotificationToUser(
+        proposal.proposedBy,
+        accept ? '✅ Resolution Accepted' : '❌ Resolution Rejected',
+        accept
+          ? `${userName} accepted your resolution for "${dispute.itemName}"`
+          : `${userName} rejected your resolution for "${dispute.itemName}"${rejectionReason ? `: ${rejectionReason}` : ''}`,
+        { type: accept ? 'dispute_resolved' : 'dispute_resolution_rejected', disputeId, screen: 'DisputeDetails' }
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error responding to proposal:', error);
+      return { success: false, error: 'Failed to respond to proposal' };
+    }
+  }
+
+  // Escalate dispute to admin
+  async escalateDispute(
+    disputeId: string,
+    userId: string,
+    userName: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const disputeRef = doc(db, 'disputes', disputeId);
+      const disputeDoc = await getDoc(disputeRef);
+      if (!disputeDoc.exists()) return { success: false, error: 'Dispute not found' };
+
+      const dispute = disputeDoc.data() as Dispute;
+
+      const activity: DisputeActivity = {
+        id: `act_${Date.now()}`,
+        type: 'escalated',
+        userId,
+        userName,
+        content: `Escalated to admin: ${reason}`,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingActivities = dispute.activities || [];
+
+      await updateDoc(disputeRef, {
+        status: 'escalated',
+        escalatedAt: new Date().toISOString(),
+        escalationReason: reason,
+        activities: [...existingActivities, activity],
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Notify both parties
+      const otherUserId = dispute.reporterId === userId ? dispute.accusedId : dispute.reporterId;
+      await NotificationService.sendNotificationToUser(
+        otherUserId,
+        '⬆️ Dispute Escalated',
+        `The dispute regarding "${dispute.itemName}" has been escalated to admin review`,
+        { type: 'dispute_escalated', disputeId, screen: 'DisputeDetails' }
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error escalating dispute:', error);
+      return { success: false, error: 'Failed to escalate dispute' };
+    }
+  }
+
+  // Get resolution type label
+  getResolutionTypeLabel(type: ResolutionProposal['type']): string {
+    const labels = {
+      full_refund: 'Full Refund',
+      partial_refund: 'Partial Refund',
+      replacement: 'Replacement',
+      repair_cost: 'Repair Cost Coverage',
+      no_action: 'No Action Needed',
+      other: 'Other',
+    };
+    return labels[type] || type;
+  }
+
   // Get dispute type label
   getDisputeTypeLabel(type: DisputeType): string {
     const labels = {
@@ -548,13 +934,30 @@ class DisputeService {
 
   // Get dispute status color
   getDisputeStatusColor(status: DisputeStatus): string {
-    const colors = {
+    const colors: Record<string, string> = {
       open: '#EF4444',
+      awaiting_response: '#F59E0B',
       investigating: '#F59E0B',
+      proposed_resolution: '#2E86AB',
       resolved: '#10B981',
       closed: '#6B7280',
+      escalated: '#DC3545',
     };
-    return colors[status];
+    return colors[status] || '#6B7280';
+  }
+
+  // Get dispute status label
+  getDisputeStatusLabel(status: DisputeStatus): string {
+    const labels: Record<string, string> = {
+      open: 'Open',
+      awaiting_response: 'Awaiting Response',
+      investigating: 'Under Investigation',
+      proposed_resolution: 'Resolution Proposed',
+      resolved: 'Resolved',
+      closed: 'Closed',
+      escalated: 'Escalated to Admin',
+    };
+    return labels[status] || status;
   }
 }
 

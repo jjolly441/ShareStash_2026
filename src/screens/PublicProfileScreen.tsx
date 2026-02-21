@@ -17,6 +17,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { ReviewService, Review, ReviewStats } from '../services/ReviewService';
 import ItemService from '../services/ItemService';
+import TrustScoreService, { TrustScoreBreakdown } from '../services/TrustScoreService';
+import { TrustScoreCard, TrustScoreCompactBadge } from '../components/TrustScoreBadge';
 
 const Colors = {
   primary: '#F5C542',
@@ -47,6 +49,7 @@ export default function PublicProfileScreen({ navigation, route }: any) {
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState<'reviews' | 'listings'>('listings');
+  const [trustScore, setTrustScore] = useState<TrustScoreBreakdown | null>(null);
 
   useEffect(() => {
     loadData();
@@ -71,6 +74,10 @@ export default function PublicProfileScreen({ navigation, route }: any) {
       // Load user's items
       const items = await ItemService.getUserItems(userId);
       setListings(items.filter((item: any) => item.isAvailable));
+
+      // Load trust score
+      const score = await TrustScoreService.computeTrustScore(userId);
+      setTrustScore(score);
     } catch (error) {
       console.error('Error loading public profile:', error);
     } finally {
@@ -219,6 +226,17 @@ export default function PublicProfileScreen({ navigation, route }: any) {
             </View>
           </View>
         </View>
+
+        {/* Trust Score */}
+        {trustScore && (
+          <View style={{ marginHorizontal: 16, marginBottom: 12 }}>
+            <TrustScoreCard
+              breakdown={trustScore}
+              showBreakdown={true}
+              isOwnProfile={false}
+            />
+          </View>
+        )}
 
         {/* Tabs */}
         <View style={styles.tabRow}>

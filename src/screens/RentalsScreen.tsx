@@ -309,6 +309,8 @@ export default function RentalsScreen() {
       renterId: rental.renterId,
       renterName: rental.renterName,
       userRole: userRole,
+      securityDeposit: rental.securityDeposit || 0,
+      depositId: rental.depositId || null,
     });
   };
 
@@ -461,6 +463,67 @@ export default function RentalsScreen() {
               <Ionicons name="document-text-outline" size={16} color={Colors.secondary} />
               <Text style={styles.confirmationText}>
                 Confirmation: {rental.confirmationNumber}
+              </Text>
+            </View>
+          )}
+
+          {/* Security Deposit Status */}
+          {rental.securityDeposit && rental.securityDeposit > 0 && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginTop: 4,
+              paddingVertical: 4,
+              paddingHorizontal: 8,
+              backgroundColor: rental.depositStatus === 'released' ? '#F0FFF4' 
+                : rental.depositStatus === 'full_claim' || rental.depositStatus === 'partial_claim' ? '#FFF5F5'
+                : '#EFF6FF',
+              borderRadius: 6,
+              alignSelf: 'flex-start',
+            }}>
+              <Ionicons 
+                name={rental.depositStatus === 'released' ? 'checkmark-circle' 
+                  : rental.depositStatus === 'full_claim' || rental.depositStatus === 'partial_claim' ? 'alert-circle'
+                  : 'shield-checkmark'} 
+                size={14} 
+                color={rental.depositStatus === 'released' ? '#46A758'
+                  : rental.depositStatus === 'full_claim' || rental.depositStatus === 'partial_claim' ? '#DC3545'
+                  : '#2E86AB'} 
+              />
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '600',
+                marginLeft: 4,
+                color: rental.depositStatus === 'released' ? '#46A758'
+                  : rental.depositStatus === 'full_claim' || rental.depositStatus === 'partial_claim' ? '#DC3545'
+                  : '#2E86AB',
+              }}>
+                Deposit ${rental.securityDeposit.toFixed(2)} — {
+                  rental.depositStatus === 'released' ? 'Released' 
+                  : rental.depositStatus === 'held' ? 'Held'
+                  : rental.depositStatus === 'full_claim' ? 'Claimed'
+                  : rental.depositStatus === 'partial_claim' ? 'Partially Claimed'
+                  : 'Pending'
+                }
+              </Text>
+            </View>
+          )}
+
+          {/* Insurance Badge */}
+          {(rental as any).insuranceTier && (rental as any).insuranceTier !== 'none' && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginTop: 4,
+              paddingVertical: 4,
+              paddingHorizontal: 8,
+              backgroundColor: '#F0FFF4',
+              borderRadius: 6,
+              alignSelf: 'flex-start',
+            }}>
+              <Ionicons name="shield-checkmark" size={14} color="#46A758" />
+              <Text style={{ fontSize: 12, fontWeight: '600', marginLeft: 4, color: '#46A758' }}>
+                {(rental as any).insurancePlanName || 'Protected'}
               </Text>
             </View>
           )}

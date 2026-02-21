@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import DisputeService, { DisputeType, DamagePhoto } from '../services/DisputeService';
+import SecurityDepositService from '../services/SecurityDepositService';
 import { AuthContext } from '../contexts/AuthContext';
 
 const Colors = {
@@ -39,6 +40,8 @@ interface RouteParams {
   renterId: string;
   renterName: string;
   userRole: 'renter' | 'owner';
+  securityDeposit?: number;
+  depositId?: string;
 }
 
 export default function ReportDamageScreen() {
@@ -170,16 +173,64 @@ export default function ReportDamageScreen() {
               });
 
               if (result.success) {
-                Alert.alert(
-                  'Dispute Submitted',
-                  'Your dispute has been submitted. Our team will review it and contact you soon.',
-                  [
-                    {
-                      text: 'OK',
-                      onPress: () => navigation.goBack(),
-                    },
-                  ]
-                );
+                // If owner has a deposit to claim, offer to do so
+                if (params.userRole === 'owner' && params.securityDeposit && params.securityDeposit > 0 && params.depositId) {
+                  const claimAmount = estimatedCost ? Math.min(parseFloat(estimatedCost), params.securityDeposit) : params.securityDeposit;
+                  
+                  Alert.alert(
+                    'Claim Security Deposit?',
+                    `A $${params.securityDeposit.toFixed(2)} security deposit is held for this rental.\n\nWould you like to claim $${claimAmount.toFixed(2)} from the deposit for damages?`,
+                    [
+                      {
+                        text: 'Skip',
+                        style: 'cancel',
+                        onPress: () => {
+                          Alert.alert('Dispute Submitted', 'Your dispute has been submitted. You can claim the deposit later from the admin team.', [
+                            { text: 'OK', onPress: () => navigation.goBack() },
+                          ]);
+                        },
+                      },
+                      {
+                        text: `Claim $${claimAmount.toFixed(2)}`,
+                        onPress: async () => {
+                          try {
+                            const claimResult = await SecurityDepositService.claimDeposit({
+                              depositId: params.depositId!,
+                              claimAmount,
+                              reason: description,
+                              photos: damagePhotos.map(p => p.uri),
+                            });
+                            if (claimResult.success) {
+                              Alert.alert('Deposit Claimed', `$${claimAmount.toFixed(2)} has been claimed from the security deposit.`, [
+                                { text: 'OK', onPress: () => navigation.goBack() },
+                              ]);
+                            } else {
+                              Alert.alert('Claim Failed', claimResult.error || 'Failed to claim deposit. Contact support.', [
+                                { text: 'OK', onPress: () => navigation.goBack() },
+                              ]);
+                            }
+                          } catch (claimError) {
+                            console.error('Deposit claim error:', claimError);
+                            Alert.alert('Dispute Submitted', 'Your dispute was submitted but the deposit claim failed. Contact support.', [
+                              { text: 'OK', onPress: () => navigation.goBack() },
+                            ]);
+                          }
+                        },
+                      },
+                    ]
+                  );
+                } else {
+                  Alert.alert(
+                    'Dispute Submitted',
+                    'Your dispute has been submitted. Our team will review it and contact you soon.',
+                    [
+                      {
+                        text: 'OK',
+                        onPress: () => navigation.goBack(),
+                      },
+                    ]
+                  );
+                }
               } else {
                 Alert.alert('Error', result.error || 'Failed to submit dispute');
               }
@@ -286,13 +337,31 @@ export default function ReportDamageScreen() {
             <Text style={styles.helperText}>
               Provide your best estimate. Include quotes if available.
             </Text>
+            {/* Show deposit info if owner has a deposit to claim */}
+            {params.userRole === 'owner' && params.securityDeposit && params.securityDeposit > 0 && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#EFF6FF',
+                borderRadius: 8,
+                padding: 10,
+                marginTop: 10,
+                borderWidth: 1,
+                borderColor: '#BFDBFE',
+              }}>
+                <Ionicons name="shield-checkmark" size={18} color={Colors.secondary} />
+                <Text style={{ fontSize: 13, color: '#374151', marginLeft: 8, flex: 1 }}>
+                  A <Text style={{ fontWeight: '700' }}>${params.securityDeposit.toFixed(2)}</Text> security deposit is held for this rental. You can claim up to this amount after submitting.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
         {/* Photos */}
         <View style={styles.section}>
           <Text style={styles.label}>
-            Evidence Photos {disputeType === 'damage' && '*'}
+            Evidence Photos {disputeType === 'damage' ? '*': ''}
           </Text>
           <Text style={styles.helperText}>
             Add photos showing the issue. Include close-ups and context shots.

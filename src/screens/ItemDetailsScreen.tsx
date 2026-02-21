@@ -238,6 +238,7 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
       pricePerMonth: item.pricePerMonth || null,
       weeklyDiscountPercent: item.weeklyDiscountPercent || null,
       monthlyDiscountPercent: item.monthlyDiscountPercent || null,
+      securityDeposit: item.securityDeposit || 0,
       ownerId: item.ownerId,
       ownerName: item.ownerName,
     });
@@ -438,6 +439,31 @@ export default function ItemDetailsScreen({ navigation, route }: any) {
               </View>
             )}
           </View>
+
+          {/* Security Deposit Notice */}
+          {item.securityDeposit && item.securityDeposit > 0 && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#EFF6FF',
+              borderRadius: 10,
+              padding: 12,
+              marginHorizontal: 16,
+              marginTop: 8,
+              borderWidth: 1,
+              borderColor: '#BFDBFE',
+            }}>
+              <Ionicons name="shield-checkmark" size={22} color={Colors.secondary} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text }}>
+                  ${item.securityDeposit.toFixed(2)} Refundable Deposit
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  Held on your card and released after successful return
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Location */}
           {item.location && (
@@ -1247,3 +1273,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
 },
 });
+

@@ -31,6 +31,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import SettingsService from '../services/SettingsService';
 import PromoCodeService, { PromoCode } from '../services/PromoCodeService';
+import SecurityDepositService from '../services/SecurityDepositService';
 import { useTranslation } from '../i18n/useTranslation';
 import { FUNCTIONS_BASE_URL } from '../config/constants';
 
@@ -233,6 +234,15 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [promoError, setPromoError] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
+
+  // Security deposit state
+  const [depositAmount, setDepositAmount] = useState(0);
+  const [depositProcessing, setDepositProcessing] = useState(false);
+
+  // Insurance state
+  const [insuranceTier, setInsuranceTier] = useState('none');
+  const [insurancePremium, setInsurancePremium] = useState(0);
+  const [insurancePlanName, setInsurancePlanName] = useState('');
   
   // FIXED: Use ref to prevent multiple simultaneous checks
   const isCheckingRef = useRef(false);
@@ -326,6 +336,17 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
       const rentalData = await RentalService.getRentalById(rentalId);
       if (rentalData) {
         setRental(rentalData);
+        // Load security deposit amount if set
+        if (rentalData.securityDeposit && rentalData.securityDeposit > 0) {
+          setDepositAmount(rentalData.securityDeposit);
+        }
+        // Load insurance info if set
+        const rd = rentalData as any;
+        if (rd.insuranceTier && rd.insuranceTier !== 'none') {
+          setInsuranceTier(rd.insuranceTier);
+          setInsurancePremium(rd.insurancePremium || 0);
+          setInsurancePlanName(rd.insurancePlanName || '');
+        }
       } else {
         Alert.alert('Error', 'Rental not found');
         navigation.goBack();
@@ -534,15 +555,48 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
           await PromoCodeService.recordUsage(appliedPromo.id, user.id, rental.id || rentalId);
         }
 
+        // Create security deposit hold if applicable
+        if (depositAmount > 0 && user) {
+          try {
+            setDepositProcessing(true);
+            const paymentMethod = paymentMethods.find(pm => pm.id === selectedPaymentMethod);
+            const depositResult = await SecurityDepositService.createDepositHold({
+              rentalId: rental.id || rentalId,
+              itemId: rental.itemId,
+              itemName: rental.itemName,
+              ownerId: rental.ownerId,
+              ownerName: rental.ownerName,
+              renterId: user.id,
+              renterName: `${user.firstName} ${user.lastName}`,
+              amount: depositAmount,
+              paymentMethodId: paymentMethod?.id || selectedPaymentMethod!,
+            });
+
+            if (!depositResult.success) {
+              console.warn('Deposit hold failed (non-blocking):', depositResult.error);
+              // Deposit hold failure is non-blocking — rental still proceeds
+              // The deposit can be retried or handled manually
+            }
+          } catch (depositError) {
+            console.warn('Deposit hold error (non-blocking):', depositError);
+          } finally {
+            setDepositProcessing(false);
+          }
+        }
+
         // Build success message with confirmation number if available
         const confirmMsg = rental.confirmationNumber
           ? `\n\nConfirmation #: ${rental.confirmationNumber}`
           : '';
 
+        const depositMsg = depositAmount > 0
+          ? `\n\nA $${depositAmount.toFixed(2)} refundable deposit has been held on your card.`
+          : '';
+
         // Success!
         Alert.alert(
           'Payment Successful! 🎉',
-          `Your rental has been confirmed. You can now arrange pickup with the owner.${confirmMsg}`,
+          `Your rental has been confirmed. You can now arrange pickup with the owner.${confirmMsg}${depositMsg}`,
           [
             {
               text: 'View Rentals',
@@ -940,12 +994,54 @@ export default function CheckoutScreen({ navigation, route }: CheckoutScreenProp
             </View>
           )}
 
+          {insurancePremium > 0 && (
+            <View style={styles.priceRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="shield-checkmark" size={14} color="#46A758" />
+                <Text style={[styles.priceLabel, { color: '#46A758', marginLeft: 4 }]}>
+                  {insurancePlanName || 'Rental Protection'}
+                </Text>
+              </View>
+              <Text style={[styles.priceValue, { color: '#46A758' }]}>Included</Text>
+            </View>
+          )}
+
           <View style={styles.divider} />
 
           <View style={styles.priceRow}>
             <Text style={styles.totalLabel}>{t('checkout.total')}</Text>
             <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
           </View>
+
+          {/* Security Deposit Notice */}
+          {depositAmount > 0 && (
+            <>
+              <View style={[styles.priceRow, { marginTop: 10 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="shield-checkmark" size={14} color={Colors.secondary} />
+                  <Text style={[styles.priceLabel, { color: Colors.secondary, marginLeft: 4 }]}>
+                    Refundable Deposit
+                  </Text>
+                </View>
+                <Text style={[styles.priceValue, { color: Colors.secondary }]}>${depositAmount.toFixed(2)}</Text>
+              </View>
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                backgroundColor: '#EFF6FF',
+                borderRadius: 8,
+                padding: 10,
+                marginTop: 8,
+                borderWidth: 1,
+                borderColor: '#BFDBFE',
+              }}>
+                <Ionicons name="information-circle" size={16} color={Colors.secondary} style={{ marginTop: 1 }} />
+                <Text style={{ fontSize: 12, color: '#4B5563', marginLeft: 6, flex: 1 }}>
+                  This deposit will be held on your card and fully refunded after successful return. It is not charged unless damage is reported.
+                </Text>
+              </View>
+            </>
+          )}
 
           <View style={styles.infoBox}>
             <Ionicons name="shield-checkmark-outline" size={20} color={Colors.success} />

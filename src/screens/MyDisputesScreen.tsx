@@ -28,7 +28,7 @@ const Colors = {
   border: '#E9ECEF',
 };
 
-type FilterType = 'all' | 'open' | 'investigating' | 'resolved';
+type FilterType = 'all' | 'open' | 'awaiting_response' | 'investigating' | 'proposed_resolution' | 'escalated' | 'resolved';
 
 export default function MyDisputesScreen() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
@@ -122,7 +122,7 @@ export default function MyDisputesScreen() {
               styles.statusText,
               { color: DisputeService.getDisputeStatusColor(item.status) }
             ]}>
-              {item.status.toUpperCase()}
+              {DisputeService.getDisputeStatusLabel(item.status)}
             </Text>
           </View>
         </View>
@@ -208,8 +208,10 @@ export default function MyDisputesScreen() {
 
       <View style={styles.filterContainer}>
         {renderFilterButton('all', 'All')}
-        {renderFilterButton('open', 'Open')}
-        {renderFilterButton('investigating', 'Investigating')}
+        {renderFilterButton('awaiting_response', 'Awaiting')}
+        {renderFilterButton('investigating', 'Active')}
+        {renderFilterButton('proposed_resolution', 'Proposed')}
+        {renderFilterButton('escalated', 'Escalated')}
         {renderFilterButton('resolved', 'Resolved')}
       </View>
 

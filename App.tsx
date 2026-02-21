@@ -324,6 +324,9 @@ function AppContent() {
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             )}
             <Stack.Screen name="MainTabs" component={MainTabs} />
+            {onboardingDone && (
+              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            )}
             <Stack.Screen name="ItemDetails" component={ItemDetailsScreen} />
             <Stack.Screen name="BookItem" component={BookItemScreen} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />

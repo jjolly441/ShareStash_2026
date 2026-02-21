@@ -33,7 +33,6 @@ const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 // Constants
 const DEFAULT_PLATFORM_FEE_PERCENT = 10; // Fallback if Firestore unavailable
-const PLATFORM_FEE_PERCENT = DEFAULT_PLATFORM_FEE_PERCENT; // Legacy reference
 const IDENTITY_VERIFICATION_THRESHOLD_CENTS = 50000; // $500
 const MAX_VERIFICATION_ATTEMPTS = 3; // NEW: Max retry attempts for identity verification
 
@@ -1636,6 +1635,330 @@ export const chatWithSupport = onRequest(
     } catch (error: any) {
       console.error("chatWithSupport error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+// ============================================
+// SECURITY DEPOSIT FUNCTIONS
+// ============================================
+
+/**
+ * Create a deposit hold (authorize but don't capture) on the renter's card.
+ * Uses Stripe PaymentIntent with capture_method: 'manual'.
+ */
+export const createDepositHold = onRequest(
+  { ...httpsOptions, secrets: [stripeSecretKey] },
+  async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const idToken = authHeader.split("Bearer ")[1];
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const userId = decodedToken.uid;
+
+      const {
+        rentalId,
+        itemId,
+        itemName,
+        ownerId,
+        amount, // in cents
+        paymentMethodId,
+      } = req.body;
+
+      if (!rentalId || !amount || !ownerId || !paymentMethodId) {
+        res.status(400).json({
+          error: "rentalId, amount, ownerId, and paymentMethodId are required",
+        });
+        return;
+      }
+
+      const stripe = getStripe(stripeSecretKey.value());
+
+      // Get or create Stripe customer
+      const userDoc = await db.collection("users").doc(userId).get();
+      const userData = userDoc.data();
+      let customerId = userData?.stripeCustomerId;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: decodedToken.email,
+          metadata: { firebaseUserId: userId },
+        });
+        customerId = customer.id;
+        await db.collection("users").doc(userId).set(
+          { stripeCustomerId: customerId },
+          { merge: true }
+        );
+      }
+
+      // Get renter and owner names
+      const renterName = userData?.firstName
+        ? `${userData.firstName} ${userData.lastName || ""}`
+        : "Renter";
+      const ownerDoc = await db.collection("users").doc(ownerId).get();
+      const ownerData = ownerDoc.data();
+      const ownerName = ownerData?.firstName
+        ? `${ownerData.firstName} ${ownerData.lastName || ""}`
+        : "Owner";
+
+      // Create PaymentIntent with manual capture (hold only)
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount,
+        currency: "usd",
+        customer: customerId,
+        payment_method: paymentMethodId,
+        payment_method_types: ["card"],
+        capture_method: "manual", // KEY: hold but don't charge
+        confirm: true,
+        return_url: `${WEB_BASE_URL}/stripe-redirect.html?type=deposit&rentalId=${rentalId}`,
+        metadata: {
+          type: "security_deposit",
+          firebaseUserId: userId,
+          rentalId,
+          itemId: itemId || "",
+          itemName: itemName || "",
+          ownerId,
+        },
+      });
+
+      // Create Firestore record
+      const depositRef = await db.collection("securityDeposits").add({
+        rentalId,
+        itemId: itemId || "",
+        itemName: itemName || "",
+        ownerId,
+        ownerName,
+        renterId: userId,
+        renterName,
+        amount: amount / 100, // Store in dollars
+        amountClaimed: 0,
+        amountReleased: 0,
+        status: paymentIntent.status === "requires_capture" ? "held" : "pending",
+        stripePaymentIntentId: paymentIntent.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        heldAt:
+          paymentIntent.status === "requires_capture"
+            ? admin.firestore.FieldValue.serverTimestamp()
+            : null,
+      });
+
+      // Link deposit to rental
+      await db.collection("rentals").doc(rentalId).set(
+        {
+          depositId: depositRef.id,
+          depositStatus: paymentIntent.status === "requires_capture" ? "held" : "pending",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      res.json({
+        paymentIntentId: paymentIntent.id,
+        status: paymentIntent.status,
+        depositId: depositRef.id,
+      });
+    } catch (error: any) {
+      console.error("createDepositHold error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * Release a deposit back to the renter (cancel the uncaptured PaymentIntent).
+ * Called when return is confirmed with no damage.
+ */
+export const releaseDeposit = onRequest(
+  { ...httpsOptions, secrets: [stripeSecretKey] },
+  async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const idToken = authHeader.split("Bearer ")[1];
+      await admin.auth().verifyIdToken(idToken);
+
+      const { depositId } = req.body;
+
+      if (!depositId) {
+        res.status(400).json({ error: "depositId is required" });
+        return;
+      }
+
+      const depositDoc = await db.collection("securityDeposits").doc(depositId).get();
+      if (!depositDoc.exists) {
+        res.status(404).json({ error: "Deposit not found" });
+        return;
+      }
+
+      const deposit = depositDoc.data()!;
+
+      if (deposit.status !== "held") {
+        res.status(400).json({
+          error: `Cannot release deposit in status: ${deposit.status}`,
+        });
+        return;
+      }
+
+      const stripe = getStripe(stripeSecretKey.value());
+
+      // Cancel the uncaptured PaymentIntent (releases the hold)
+      await stripe.paymentIntents.cancel(deposit.stripePaymentIntentId);
+
+      // Update deposit record
+      await db.collection("securityDeposits").doc(depositId).update({
+        status: "released",
+        amountReleased: deposit.amount,
+        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update rental
+      await db.collection("rentals").doc(deposit.rentalId).set(
+        {
+          depositStatus: "released",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Notify renter
+      await db.collection("notifications").add({
+        userId: deposit.renterId,
+        title: "🔓 Deposit Released",
+        body: `Your $${deposit.amount.toFixed(2)} security deposit for "${deposit.itemName}" has been released.`,
+        data: { type: "deposit_released", rentalId: deposit.rentalId, screen: "Rentals" },
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("releaseDeposit error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * Claim part or all of a deposit for damages.
+ * Captures the specified amount from the held PaymentIntent.
+ */
+export const claimDeposit = onRequest(
+  { ...httpsOptions, secrets: [stripeSecretKey] },
+  async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const idToken = authHeader.split("Bearer ")[1];
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const userId = decodedToken.uid;
+
+      const { depositId, claimAmount, reason, photos } = req.body;
+
+      if (!depositId || !claimAmount || !reason) {
+        res.status(400).json({
+          error: "depositId, claimAmount (cents), and reason are required",
+        });
+        return;
+      }
+
+      const depositDoc = await db.collection("securityDeposits").doc(depositId).get();
+      if (!depositDoc.exists) {
+        res.status(404).json({ error: "Deposit not found" });
+        return;
+      }
+
+      const deposit = depositDoc.data()!;
+
+      // Only the owner can claim
+      if (deposit.ownerId !== userId) {
+        res.status(403).json({ error: "Only the item owner can claim a deposit" });
+        return;
+      }
+
+      if (deposit.status !== "held") {
+        res.status(400).json({
+          error: `Cannot claim deposit in status: ${deposit.status}`,
+        });
+        return;
+      }
+
+      const depositAmountCents = Math.round(deposit.amount * 100);
+      const claimCents = Math.min(claimAmount, depositAmountCents);
+      const isFullClaim = claimCents >= depositAmountCents;
+
+      const stripe = getStripe(stripeSecretKey.value());
+
+      // Capture the claim amount from the held PaymentIntent
+      await stripe.paymentIntents.capture(deposit.stripePaymentIntentId, {
+        amount_to_capture: claimCents,
+      });
+
+      const claimedDollars = claimCents / 100;
+      const releasedDollars = deposit.amount - claimedDollars;
+
+      // Update deposit record
+      await db.collection("securityDeposits").doc(depositId).update({
+        status: isFullClaim ? "full_claim" : "partial_claim",
+        amountClaimed: claimedDollars,
+        amountReleased: releasedDollars,
+        claimReason: reason,
+        claimPhotos: photos || [],
+        claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update rental
+      await db.collection("rentals").doc(deposit.rentalId).set(
+        {
+          depositStatus: isFullClaim ? "full_claim" : "partial_claim",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Notify renter about the claim
+      await db.collection("notifications").add({
+        userId: deposit.renterId,
+        title: "⚠️ Deposit Claimed",
+        body: `$${claimedDollars.toFixed(2)} of your $${deposit.amount.toFixed(2)} deposit for "${deposit.itemName}" was claimed for damages: ${reason}`,
+        data: { type: "deposit_claimed", rentalId: deposit.rentalId, screen: "Rentals" },
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Notify owner about successful claim
+      await db.collection("notifications").add({
+        userId: deposit.ownerId,
+        title: "✅ Deposit Claim Processed",
+        body: `Your damage claim of $${claimedDollars.toFixed(2)} for "${deposit.itemName}" has been processed.`,
+        data: { type: "deposit_claim_processed", rentalId: deposit.rentalId, screen: "Rentals" },
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.json({
+        success: true,
+        amountClaimed: claimedDollars,
+        amountReleased: releasedDollars,
+      });
+    } catch (error: any) {
+      console.error("claimDeposit error:", error);
+      res.status(500).json({ error: error.message });
     }
   }
 );

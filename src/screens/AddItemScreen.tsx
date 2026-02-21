@@ -47,6 +47,7 @@ interface ItemData {
   pricePerHour: string;
   pricePerWeek: string;
   pricePerMonth: string;
+  securityDeposit: string;
   image: string | null;
   location: {
     address: string;
@@ -159,6 +160,7 @@ export default function AddItemScreen({ route }: any) {
     pricePerHour: '',
     pricePerWeek: '',
     pricePerMonth: '',
+    securityDeposit: '',
     image: null,
     location: {
       address: '',
@@ -228,6 +230,7 @@ export default function AddItemScreen({ route }: any) {
           pricePerHour: existingItem.pricePerHour?.toString() || '',
           pricePerWeek: existingItem.pricePerWeek?.toString() || '',
           pricePerMonth: existingItem.pricePerMonth?.toString() || '',
+          securityDeposit: existingItem.securityDeposit?.toString() || '',
           image: existingItem.image,
           location: existingItem.location || {
             address: '',
@@ -468,6 +471,7 @@ export default function AddItemScreen({ route }: any) {
           ...(itemData.pricePerHour ? { pricePerHour: parseFloat(itemData.pricePerHour) } : {}),
           ...(itemData.pricePerWeek ? { pricePerWeek: parseFloat(itemData.pricePerWeek) } : {}),
           ...(itemData.pricePerMonth ? { pricePerMonth: parseFloat(itemData.pricePerMonth) } : {}),
+          ...(itemData.securityDeposit ? { securityDeposit: parseFloat(itemData.securityDeposit) } : { securityDeposit: 0 }),
           image: itemData.image!,
           isAvailable: true,
           location: itemData.location,
@@ -492,6 +496,7 @@ export default function AddItemScreen({ route }: any) {
           ...(itemData.pricePerHour ? { pricePerHour: parseFloat(itemData.pricePerHour) } : {}),
           ...(itemData.pricePerWeek ? { pricePerWeek: parseFloat(itemData.pricePerWeek) } : {}),
           ...(itemData.pricePerMonth ? { pricePerMonth: parseFloat(itemData.pricePerMonth) } : {}),
+          ...(itemData.securityDeposit ? { securityDeposit: parseFloat(itemData.securityDeposit) } : {}),
           image: itemData.image!,
           ownerId: user.id,
           ownerName: `${user.firstName} ${user.lastName}`,
@@ -516,6 +521,7 @@ export default function AddItemScreen({ route }: any) {
                     pricePerHour: '',
                     pricePerWeek: '',
                     pricePerMonth: '',
+                    securityDeposit: '',
                     image: null,
                     location: {
                       address: '',
@@ -858,6 +864,27 @@ export default function AddItemScreen({ route }: any) {
                   />
                 </View>
               </View>
+            </View>
+          </View>
+
+          {/* Security Deposit (Optional) */}
+          <View style={styles.section}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={Colors.secondary} />
+              <Text style={[styles.label, { marginLeft: 6, marginBottom: 0 }]}>Security Deposit (Optional)</Text>
+            </View>
+            <Text style={{ fontSize: 12, color: '#6C757D', marginBottom: 8 }}>
+              Set a refundable deposit to protect against damage. This amount is held on the renter's card and released after a successful return.
+            </Text>
+            <View style={styles.priceInputContainer}>
+              <Text style={styles.dollarSign}>$</Text>
+              <TextInput
+                style={styles.priceInput}
+                value={itemData.securityDeposit}
+                onChangeText={(value) => updateField('securityDeposit', value)}
+                placeholder="0.00"
+                keyboardType="numeric"
+              />
             </View>
           </View>
 

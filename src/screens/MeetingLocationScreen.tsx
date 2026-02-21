@@ -289,7 +289,7 @@ export default function MeetingLocationScreen({ navigation, route }: Props) {
                 latitude: pin.latitude,
                 longitude: pin.longitude,
                 address,
-                notes: notes || undefined,
+                notes: notes || '',
                 proposedBy: user.id,
                 proposedByName: `${user.firstName} ${user.lastName}`,
                 status: 'proposed',

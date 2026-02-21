@@ -18,6 +18,8 @@ import { RentalService } from '../services/RentalService'; // FIXED: Named impor
 import MessageService from '../services/MessageService';
 import { AuthContext } from '../contexts/AuthContext';
 import SettingsService from '../services/SettingsService';
+import InsuranceService, { InsuranceTier } from '../services/InsuranceService';
+import InsurancePicker from '../components/InsurancePicker';
 import { useTranslation } from '../i18n/useTranslation';
 
 const Colors = {
@@ -34,7 +36,7 @@ const Colors = {
 type RentalPeriodType = 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 export default function BookItemScreen({ navigation, route }: any) {
-  const { itemId, itemTitle, itemImage, pricePerDay, pricePerHour, pricePerWeek, pricePerMonth, weeklyDiscountPercent, monthlyDiscountPercent, ownerId, ownerName } = route.params;
+  const { itemId, itemTitle, itemImage, pricePerDay, pricePerHour, pricePerWeek, pricePerMonth, weeklyDiscountPercent, monthlyDiscountPercent, securityDeposit, ownerId, ownerName } = route.params;
   const { user } = useContext(AuthContext);
   const { t } = useTranslation();
 
@@ -63,6 +65,8 @@ export default function BookItemScreen({ navigation, route }: any) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [feePercent, setFeePercent] = useState(0.10);
+  const [insuranceTier, setInsuranceTier] = useState<InsuranceTier>('none');
+  const [insurancePremium, setInsurancePremium] = useState(0);
 
   useEffect(() => {
     SettingsService.getServiceFeeDecimal().then(fee => setFeePercent(fee)).catch(() => {});
@@ -109,7 +113,7 @@ export default function BookItemScreen({ navigation, route }: any) {
     const discountAmount = subtotal * (discountPercent / 100);
     const totalPrice = subtotal - discountAmount;
     const serviceFee = totalPrice * feePercent;
-    const finalTotal = totalPrice + serviceFee;
+    const finalTotal = totalPrice + serviceFee + insurancePremium;
 
     return { units, unitPrice, unitLabel, subtotal, discountPercent, discountLabel, discountAmount, totalPrice, serviceFee, finalTotal, totalDays: units };
   };
@@ -206,6 +210,13 @@ export default function BookItemScreen({ navigation, route }: any) {
         rentalQuantity: units,
         status: 'pending',
         message: message,
+        ...(securityDeposit && securityDeposit > 0 ? { securityDeposit } : {}),
+        ...(insuranceTier !== 'none' ? {
+          insuranceTier,
+          insurancePremium,
+          insuranceCoverageMax: InsuranceService.getPlan(insuranceTier).coverageMax,
+          insurancePlanName: InsuranceService.getPlan(insuranceTier).name,
+        } : {}),
       });
 
       // Create conversation with owner
@@ -436,6 +447,19 @@ export default function BookItemScreen({ navigation, route }: any) {
         </View>
 
         {/* Price Breakdown */}
+        {/* Insurance / Rental Protection */}
+        <View style={styles.section}>
+          <InsurancePicker
+            rentalPrice={totalPrice}
+            selectedTier={insuranceTier}
+            onSelectTier={(tier, premium) => {
+              setInsuranceTier(tier);
+              setInsurancePremium(premium);
+            }}
+          />
+        </View>
+
+        {/* Price Details */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('booking.priceDetails')}</Text>
 
@@ -463,12 +487,50 @@ export default function BookItemScreen({ navigation, route }: any) {
             <Text style={styles.priceValue}>${serviceFee.toFixed(2)}</Text>
           </View>
 
+          {insurancePremium > 0 && (
+            <View style={styles.priceRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name={InsuranceService.getTierIcon(insuranceTier) as any} size={14} color={InsuranceService.getTierColor(insuranceTier)} />
+                <Text style={[styles.priceLabel, { color: InsuranceService.getTierColor(insuranceTier), marginLeft: 4 }]}>
+                  {InsuranceService.getPlan(insuranceTier).name}
+                </Text>
+              </View>
+              <Text style={[styles.priceValue, { color: InsuranceService.getTierColor(insuranceTier) }]}>
+                ${insurancePremium.toFixed(2)}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.divider} />
 
           <View style={styles.priceRow}>
             <Text style={styles.totalLabel}>{t('booking.total')}</Text>
             <Text style={styles.totalValue}>${finalTotal.toFixed(2)}</Text>
           </View>
+
+          {/* Security Deposit Notice */}
+          {securityDeposit > 0 && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#EFF6FF',
+              borderRadius: 10,
+              padding: 12,
+              marginTop: 10,
+              borderWidth: 1,
+              borderColor: '#BFDBFE',
+            }}>
+              <Ionicons name="shield-checkmark" size={20} color={Colors.secondary} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text }}>
+                  + ${securityDeposit.toFixed(2)} Refundable Deposit
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  Held on your card, released after successful return
+                </Text>
+              </View>
+            </View>
+          )}
 
           {discountPercent > 0 && (
             <View style={{ backgroundColor: '#F0FFF4', borderRadius: 8, padding: 10, marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>

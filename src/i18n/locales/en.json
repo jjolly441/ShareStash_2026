@@ -200,5 +200,18 @@
     "title": "My Wishlist",
     "empty": "Your wishlist is empty",
     "emptyMessage": "Tap the heart icon on items you love to save them here"
+  },
+  "deposit": {
+    "securityDeposit": "Security Deposit",
+    "refundableDeposit": "Refundable Deposit",
+    "depositHeld": "Deposit Held",
+    "depositReleased": "Deposit Released",
+    "depositClaimed": "Deposit Claimed",
+    "depositPending": "Deposit Pending",
+    "depositDescription": "Held on your card and released after successful return",
+    "claimDeposit": "Claim Deposit",
+    "releaseDeposit": "Release Deposit",
+    "depositAmount": "Deposit Amount",
+    "optional": "Optional"
   }
 }

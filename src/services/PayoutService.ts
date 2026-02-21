@@ -353,6 +353,53 @@ class PayoutServiceClass {
       return [];
     }
   }
+
+  /**
+   * Get recent payouts (limited count)
+   */
+  async getRecentPayouts(ownerId: string, limit: number = 5): Promise<Payout[]> {
+    try {
+      const q = query(
+        this.payoutsCollection,
+        where('userId', '==', ownerId),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.slice(0, limit).map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          amount: (data.amount || 0) / 100,
+          platformFee: (data.platformFee || 0) / 100,
+          originalAmount: (data.originalAmount || 0) / 100,
+        } as Payout;
+      });
+    } catch (error) {
+      console.error('Error fetching recent payouts:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get a quick earnings summary (for profile card display)
+   */
+  async getQuickSummary(ownerId: string): Promise<{
+    totalEarned: number;
+    pendingAmount: number;
+    payoutCount: number;
+  }> {
+    try {
+      const earnings = await this.getOwnerEarnings(ownerId);
+      return {
+        totalEarned: earnings.totalEarnings,
+        pendingAmount: earnings.pendingPayouts,
+        payoutCount: earnings.payoutHistory.length,
+      };
+    } catch (error) {
+      return { totalEarned: 0, pendingAmount: 0, payoutCount: 0 };
+    }
+  }
 }
 
 // Export singleton instance

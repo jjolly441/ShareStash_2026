@@ -45,6 +45,7 @@ export interface RentalItem {
     } | null;
   };
   viewCount?: number;
+  securityDeposit?: number;  // Optional refundable deposit amount set by owner
 }
 
 class ItemService {
