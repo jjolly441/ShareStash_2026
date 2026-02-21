@@ -17,6 +17,7 @@ import { NavigationContainer, LinkingOptions, NavigationContainerRef } from '@re
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import * as Font from 'expo-font';
 import { AuthProvider, AuthContext } from './src/contexts/AuthContext';
 import NotificationService from './src/services/NotificationService';
 import { initializeLanguage, t as translate } from './src/i18n';
@@ -64,6 +65,7 @@ import HelpCenterScreen from './src/screens/HelpCenterScreen';
 import SupportChatScreen from './src/screens/SupportChatScreen';
 import WishlistScreen from './src/screens/WishlistScreen';
 import OnboardingScreen, { hasCompletedOnboarding } from './src/screens/OnboardingScreen';
+import WebLandingScreen from './src/screens/WebLandingScreen';
 
 // Verification hook for abandoned verification reminders
 import { useVerificationReminder } from './src/hooks/useVerification';
@@ -87,6 +89,7 @@ const linking: LinkingOptions<RootStackParamList> = {
     screens: {
       Login: 'login',
       Register: 'register',
+      WebLanding: 'welcome',
       MainTabs: {
         path: '',
         screens: {
@@ -181,6 +184,24 @@ function VerificationReminderHandler() {
 // ============================================================================
 
 export default function App() {
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+
+  useEffect(() => {
+    async function loadFonts() {
+      try {
+        await Font.loadAsync({
+          ...Ionicons.font,
+        });
+      } catch (e) {
+        console.warn('Font loading error:', e);
+      }
+      setFontsLoaded(true);
+    }
+    loadFonts();
+  }, []);
+
+  if (!fontsLoaded) return null;
+
   return (
     <AuthProvider>
       <StripeProviderWrapper>
@@ -319,16 +340,17 @@ function AppContent() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           <>
+            {isWeb && <Stack.Screen name="WebLanding" component={WebLandingScreen} />}
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Register" component={RegisterScreen} />
           </>
         ) : (
           <>
-            {!onboardingDone && (
+            {!isWeb && !onboardingDone && (
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             )}
             <Stack.Screen name="MainTabs" component={MainTabs} />
-            {onboardingDone && (
+            {!isWeb && onboardingDone && (
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             )}
             <Stack.Screen name="ItemDetails" component={ItemDetailsScreen} />
